@@ -209,6 +209,8 @@ function normalizeStateInput(input) {
     serviceLinks: story.type !== 'Epic' && epicIds.has(story.epicId) ? [] : story.serviceLinks,
   }));
   const roundSource = source.round && typeof source.round === 'object' ? source.round : {};
+  const roomSettingsSource = source.roomSettings && typeof source.roomSettings === 'object' ? source.roomSettings : {};
+  const legacyAiEnabled = rawStories.some((story) => story.type !== 'Epic' && (story.aiEnabled === true || parseScore(story.ai) !== null));
   const selectedStoryId = stories.some((story) => story.id === source.selectedStoryId)
     ? source.selectedStoryId
     : stories[0]?.id || null;
@@ -220,21 +222,28 @@ function normalizeStateInput(input) {
     : 1;
   const roundMode = roundSource.mode === 'open' ? 'open' : 'hidden';
   const hideVoteCountUntilComplete = roundMode === 'hidden' && roundSource.hideVoteCountUntilComplete === true;
+  const roomSettings = {
+    aiEnabled: roomSettingsSource.aiEnabled === undefined ? legacyAiEnabled : roomSettingsSource.aiEnabled === true,
+    voteMode: roomSettingsSource.voteMode === 'open' ? 'open' : roomSettingsSource.voteMode === 'hidden' ? 'hidden' : roundMode,
+    hideVoteCountUntilComplete: roomSettingsSource.hideVoteCountUntilComplete === true || hideVoteCountUntilComplete,
+  };
 
   return {
     sequence: ALLOWED_SEQUENCES.has(source.sequence) ? source.sequence : 'fibonacci',
+    roomSettings,
     selectedStoryId,
     domains,
     services,
     stories,
     round: {
       phase: ALLOWED_PHASES.has(roundSource.phase) ? roundSource.phase : 'idle',
-      mode: roundMode,
-      storageMode: hideVoteCountUntilComplete ? 'hidden-count' : roundMode,
-      hideVoteCountUntilComplete,
+      mode: roomSettings.voteMode,
+      storageMode: roomSettings.hideVoteCountUntilComplete ? 'hidden-count' : roomSettings.voteMode,
+      hideVoteCountUntilComplete: roomSettings.hideVoteCountUntilComplete,
       storyId: roundStoryId,
       roundNumber,
       revealedAt: roundSource.revealedAt ? cleanTimer(roundSource.revealedAt) : null,
+      timerStartedAt: cleanTimer(roundSource.timerStartedAt),
       timerEndsAt: cleanTimer(roundSource.timerEndsAt),
     },
   };
@@ -296,8 +305,8 @@ async function ensureBootstrapAdmin(db, env) {
         (id, email, display_name, username, password_hash, password_salt, role, disabled, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 'admin', 0, ?, ?)`)
         .bind(accountId, `${username}@pointline.local`, 'Pointline Admin', username, passwordRecord.hash, passwordRecord.salt, now, now),
-    db.prepare(`INSERT OR IGNORE INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', ?, ?)`)
+    db.prepare(`INSERT OR IGNORE INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?)`)
       .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, accountId, now, now),
     db.prepare('UPDATE rooms SET owner_account_id = ? WHERE id = ?').bind(accountId, DEFAULT_ROOM_ID),
     db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
@@ -313,8 +322,8 @@ async function ensureDefaultRoomMembership(db, user) {
   const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(DEFAULT_ROOM_ID).first();
   if (!room) {
     const now = new Date().toISOString();
-    await db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', ?, ?)`)
+    await db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?)`)
       .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, now, now)
       .run();
   }
@@ -485,7 +494,7 @@ async function addRoomMembers(db, user, roomId, input) {
 }
 
 async function readRoomState(db, roomId, userId) {
-  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode
+  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode, ai_enabled
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
 
@@ -550,7 +559,7 @@ async function readRoomState(db, roomId, userId) {
     : stories[0]?.id || null;
   let currentRound = null;
   if (selectedStoryId) {
-    currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at
+    currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at, timer_started_at
       FROM planning_rounds WHERE room_id = ? AND story_key = ?
       ORDER BY round_number DESC LIMIT 1`).bind(roomId, selectedStoryId).first();
   }
@@ -566,6 +575,7 @@ async function readRoomState(db, roomId, userId) {
       votes: {},
       cardFlipped: false,
       revealedAt: currentRound.revealed_at || null,
+      timerStartedAt: currentRound.timer_started_at || (currentRound.timer_ends_at ? new Date(Date.parse(currentRound.timer_ends_at) - 5 * 60 * 1000).toISOString() : null),
       timerEndsAt: currentRound.timer_ends_at || null,
     }
     : {
@@ -578,6 +588,7 @@ async function readRoomState(db, roomId, userId) {
       votes: {},
       cardFlipped: false,
       revealedAt: null,
+      timerStartedAt: null,
       timerEndsAt: null,
     };
 
@@ -654,6 +665,11 @@ async function readRoomState(db, roomId, userId) {
       ? {
         resourceModelVersion: 1,
         sequence: ALLOWED_SEQUENCES.has(room.sequence_key) ? room.sequence_key : 'fibonacci',
+        roomSettings: {
+          aiEnabled: room.ai_enabled !== 0,
+          voteMode: room.vote_mode === 'open' ? 'open' : 'hidden',
+          hideVoteCountUntilComplete: room.vote_mode === 'hidden-count',
+        },
         selectedStoryId,
         stories,
         domains,
@@ -819,7 +835,7 @@ async function saveRoomState(db, roomId, input, user) {
     throw error;
   }
 
-  const currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at
+  const currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at, timer_started_at
     FROM planning_rounds WHERE room_id = ? AND story_key = ? ORDER BY round_number DESC LIMIT 1`)
     .bind(roomId, source.round.storyId)
     .first();
@@ -829,7 +845,7 @@ async function saveRoomState(db, roomId, input, user) {
       || currentRound.phase !== source.round.phase
       || currentRound.mode !== source.round.storageMode
       || (currentRound.revealed_at || null) !== (source.round.revealedAt || null)
-      || (currentRound.timer_ends_at || null) !== (source.round.timerEndsAt || null)
+      || (currentRound.timer_started_at || null) !== (source.round.timerStartedAt || null)
     : source.round.phase !== 'idle' || source.round.timerEndsAt !== null;
   if (roundChanged && !(await canManageRoom(db, roomId, user))) {
     throw authError('Only the room owner or an admin can manage the voting round', 403);
@@ -837,9 +853,9 @@ async function saveRoomState(db, roomId, input, user) {
 
   const now = new Date().toISOString();
   const reservation = await db.prepare(`UPDATE rooms
-    SET state_version = state_version + 1, sequence_key = ?, selected_story_key = ?, vote_mode = ?, updated_at = ?
+    SET state_version = state_version + 1, sequence_key = ?, selected_story_key = ?, vote_mode = ?, ai_enabled = ?, updated_at = ?
     WHERE id = ? AND state_version = ?`)
-    .bind(source.sequence, source.selectedStoryId, source.round.storageMode, now, roomId, currentVersion)
+    .bind(source.sequence, source.selectedStoryId, source.round.storageMode, source.roomSettings.aiEnabled ? 1 : 0, now, roomId, currentVersion)
     .run();
   if (Number(reservation?.meta?.changes) !== 1) {
     const error = new Error('This room changed elsewhere. Your latest changes will be merged and retried.');
@@ -898,11 +914,11 @@ async function saveRoomState(db, roomId, input, user) {
 
   if (source.round.storyId) {
     statements.push(db.prepare(`INSERT INTO planning_rounds
-      (room_id, story_key, round_number, phase, mode, submitted_count, revealed_at, timer_ends_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+      (room_id, story_key, round_number, phase, mode, submitted_count, revealed_at, timer_ends_at, timer_started_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
       ON CONFLICT(room_id, story_key, round_number) DO UPDATE SET phase = excluded.phase,
-        mode = excluded.mode, revealed_at = excluded.revealed_at, timer_ends_at = excluded.timer_ends_at, updated_at = excluded.updated_at`)
-      .bind(roomId, source.round.storyId, source.round.roundNumber, source.round.phase, source.round.storageMode, source.round.revealedAt, source.round.timerEndsAt, now));
+        mode = excluded.mode, revealed_at = excluded.revealed_at, timer_ends_at = excluded.timer_ends_at, timer_started_at = excluded.timer_started_at, updated_at = excluded.updated_at`)
+      .bind(roomId, source.round.storyId, source.round.roundNumber, source.round.phase, source.round.storageMode, source.round.revealedAt, source.round.timerEndsAt, source.round.timerStartedAt, now));
   }
 
   await runBatches(db, statements);
@@ -920,8 +936,8 @@ async function createRoom(db, user, input) {
   const roomId = makeId('room');
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', ?, ?)`)
+    db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?)`)
       .bind(roomId, name, piLabel, user.id, now, now),
     db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
       VALUES (?, ?, 'owner', ?)`)

@@ -50,6 +50,13 @@
       "when": 1788795590979,
       "tag": "0006_gorgeous_marvex",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788808272434,
+      "tag": "0007_yielding_amazoness",
+      "breakpoints": true
     }
   ]
 }

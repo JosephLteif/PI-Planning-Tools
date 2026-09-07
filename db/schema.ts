@@ -36,6 +36,7 @@ export const rooms = sqliteTable('rooms', {
   sequenceKey: text('sequence_key').notNull().default('fibonacci'),
   selectedStoryKey: text('selected_story_key'),
   voteMode: text('vote_mode').notNull().default('hidden'),
+  aiEnabled: integer('ai_enabled').notNull().default(1),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -136,6 +137,7 @@ export const planningRounds = sqliteTable('planning_rounds', {
   submittedCount: integer('submitted_count').notNull().default(0),
   revealedAt: text('revealed_at'),
   timerEndsAt: text('timer_ends_at'),
+  timerStartedAt: text('timer_started_at'),
   updatedAt: text('updated_at').notNull(),
 }, (table) => ({
   roundsPk: primaryKey({ columns: [table.roomId, table.storyKey, table.roundNumber] }),
