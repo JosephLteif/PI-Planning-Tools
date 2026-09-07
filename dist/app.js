@@ -1054,7 +1054,7 @@ function renderVoteHistoryRows() {
     const storyDifference = (storyOrder.get(left.storyId) ?? Number.MAX_SAFE_INTEGER) - (storyOrder.get(right.storyId) ?? Number.MAX_SAFE_INTEGER);
     return storyDifference || right.roundNumber - left.roundNumber || left.voterName.localeCompare(right.voterName);
   });
-  if (!rows.length) return '<tr><td colspan="5" class="table-score muted">No member votes recorded yet. Reveal a round to keep them here.</td></tr>';
+  if (!rows.length) return '<tr><td colspan="5" class="table-score muted table-empty">No member votes recorded yet. Reveal a round to keep them here.</td></tr>';
 
   return rows.map((entry) => {
     const story = state.stories.find((candidate) => candidate.id === entry.storyId);
@@ -1216,6 +1216,7 @@ function addImportedStories(stories) {
 }
 
 function bindEvents() {
+  hydrateIcons();
   document.querySelector('[data-login-form]')?.addEventListener('submit', loginWithPassword);
   document.querySelector('[data-admin-user-form]')?.addEventListener('submit', createUserFromAdmin);
   document.querySelector('[data-copy-credentials]')?.addEventListener('click', (event) => copyText(event.currentTarget.dataset.copyCredentials, 'Credentials copied'));
@@ -2218,6 +2219,14 @@ function startSitePolling() {
   siteRuntime.pollTimer = window.setInterval(() => refreshSiteState(), 2000);
 }
 
+function hasActiveEditor() {
+  const activeElement = document.activeElement;
+  return Boolean(
+    document.querySelector('[data-modal-backdrop]')
+    || activeElement?.matches('input, textarea, select, [contenteditable="true"]'),
+  );
+}
+
 async function refreshSiteState({ renderAfter = true } = {}) {
   if (!siteRuntime.ready || siteRuntime.refreshing || siteStateHasPendingChanges()) return;
   siteRuntime.refreshing = true;
@@ -2231,7 +2240,7 @@ async function refreshSiteState({ renderAfter = true } = {}) {
       persistLocalState();
     }
     cloud.status = 'synced';
-    if (renderAfter) render();
+    if (renderAfter && !hasActiveEditor()) render();
     else updateCloudStatusBadge();
   } catch (error) {
     if (handleSessionExpired(error)) return;
@@ -2394,6 +2403,7 @@ async function loadAuthenticatedSiteSession() {
     }
     cloud.user = me.user || null;
     cloud.authError = '';
+    activeView = getViewFromLocation();
     cloud.roomId = me.roomId || null;
     cloud.room = normalizeRoomRecord(me.room);
     cloud.memberCount = Math.max(1, Number(me.memberCount) || 1);
@@ -2424,6 +2434,7 @@ async function loadAuthenticatedSiteSession() {
 
 async function initializeSitesBackend() {
   if (!siteRuntime.enabled) return;
+  activeView = getViewFromLocation();
   cloud.status = 'connecting';
   cloud.authError = '';
   render();
