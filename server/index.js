@@ -490,7 +490,19 @@ async function deleteManagedUser(db, user, accountId) {
   const target = await db.prepare('SELECT id FROM accounts WHERE id = ? LIMIT 1').bind(accountId).first();
   if (!target) throw authError('User not found', 404);
   if (target.id === user.id) throw authError('You cannot remove your own admin account', 400);
+  const roomResult = await db.prepare('SELECT id, capacity_json FROM rooms').all();
+  const capacityUpdates = rows(roomResult).flatMap((room) => {
+    try {
+      const capacity = JSON.parse(room.capacity_json || '{}');
+      if (!Array.isArray(capacity.members) || !capacity.members.some((member) => cleanId(member?.id || member?.accountId) === accountId)) return [];
+      return [db.prepare('UPDATE rooms SET capacity_json = ?, state_version = state_version + 1, updated_at = ? WHERE id = ?')
+        .bind(JSON.stringify({ ...capacity, members: capacity.members.filter((member) => cleanId(member?.id || member?.accountId) !== accountId) }), new Date().toISOString(), room.id)];
+    } catch {
+      return [];
+    }
+  });
   await db.batch([
+    ...capacityUpdates,
     db.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId),
     db.prepare('DELETE FROM room_members WHERE account_id = ?').bind(accountId),
     db.prepare('DELETE FROM team_members WHERE account_id = ?').bind(accountId),
