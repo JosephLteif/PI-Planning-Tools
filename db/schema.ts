@@ -37,6 +37,7 @@ export const rooms = sqliteTable('rooms', {
   selectedStoryKey: text('selected_story_key'),
   voteMode: text('vote_mode').notNull().default('hidden'),
   aiEnabled: integer('ai_enabled').notNull().default(1),
+  capacityJson: text('capacity_json').notNull().default('{}'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

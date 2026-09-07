@@ -141,6 +141,7 @@ const defaultServices = [
 
 const defaultState = {
   resourceModelVersion: 1,
+  capacity: defaultCapacityState(),
   sequence: 'fibonacci',
   roomSettings: {
     aiEnabled: true,
@@ -347,6 +348,89 @@ function normalizeRoomSettings(settings, fallbackRound, stories = []) {
   };
 }
 
+function clampCapacityPercent(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  const normalized = number > 1 ? number / 100 : number;
+  return Math.min(1, Math.max(0, normalized));
+}
+
+function defaultCapacityState() {
+  return {
+    defaults: {
+      ceremoniesPct: 0.13,
+      featureCapacityPct: 0.8,
+      supportCapacityPct: 0.2,
+    },
+    members: [],
+    sprints: [],
+  };
+}
+
+function normalizeCapacityState(capacity, roster = []) {
+  const source = capacity && typeof capacity === 'object' ? capacity : {};
+  const sourceDefaults = source.defaults && typeof source.defaults === 'object' ? source.defaults : {};
+  const members = Array.isArray(source.members) ? source.members.map((member) => ({
+    id: String(member?.id || member?.accountId || '').trim(),
+    name: String(member?.name || 'Planner').trim() || 'Planner',
+    office: member?.office === 'cyprus' ? 'cyprus' : 'beirut',
+    trainStaffDevCapacityPct: clampCapacityPercent(member?.trainStaffDevCapacityPct, 0.75),
+  })).filter((member) => member.id) : [];
+  const knownIds = new Set(members.map((member) => member.id));
+  roster.forEach((member) => {
+    const id = String(member?.id || '').trim();
+    if (id && !knownIds.has(id)) {
+      members.push({ id, name: String(member?.name || 'Planner').trim() || 'Planner', office: 'beirut', trainStaffDevCapacityPct: 0.75 });
+    }
+  });
+  return {
+    defaults: {
+      ceremoniesPct: clampCapacityPercent(sourceDefaults.ceremoniesPct, 0.13),
+      featureCapacityPct: clampCapacityPercent(sourceDefaults.featureCapacityPct, 0.8),
+      supportCapacityPct: clampCapacityPercent(sourceDefaults.supportCapacityPct, 0.2),
+    },
+    members,
+    sprints: Array.isArray(source.sprints) ? source.sprints.map((sprint) => ({
+      id: String(sprint?.id || '').trim(),
+      name: String(sprint?.name || 'Sprint').trim() || 'Sprint',
+      startDate: String(sprint?.startDate || '').trim(),
+      endDate: String(sprint?.endDate || '').trim(),
+      holidayDaysBeirut: Math.max(0, Math.min(366, Number(sprint?.holidayDaysBeirut) || 0)),
+      holidayDaysCyprus: Math.max(0, Math.min(366, Number(sprint?.holidayDaysCyprus) || 0)),
+      availabilityDays: sprint?.availabilityDays && typeof sprint.availabilityDays === 'object'
+        ? Object.fromEntries(Object.entries(sprint.availabilityDays).map(([id, days]) => [String(id), Math.max(0, Math.min(366, Number(days) || 0))]))
+        : {},
+    })).filter((sprint) => sprint.id) : [],
+  };
+}
+
+function businessDaysInclusive(startDate, endDate) {
+  if (!startDate || !endDate) return 0;
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end < start) return 0;
+  let days = 0;
+  for (let current = start; current <= end; current = new Date(current.getTime() + 86400000)) {
+    const day = current.getUTCDay();
+    if (day !== 0 && day !== 6) days += 1;
+  }
+  return days;
+}
+
+function capacityForMemberSprint(member, sprint) {
+  const defaults = state.capacity.defaults;
+  const workdays = businessDaysInclusive(sprint.startDate, sprint.endDate);
+  const holidayDays = member.office === 'cyprus' ? sprint.holidayDaysCyprus : sprint.holidayDaysBeirut;
+  const officeDays = Math.max(0, workdays - holidayDays);
+  const availability = Number.isFinite(Number(sprint.availabilityDays?.[member.id]))
+    ? Math.max(0, Math.min(366, Number(sprint.availabilityDays[member.id])))
+    : officeDays;
+  const devPct = Math.max(0, member.trainStaffDevCapacityPct - defaults.ceremoniesPct);
+  const feature = devPct * availability * defaults.featureCapacityPct;
+  const support = devPct * availability * defaults.supportCapacityPct;
+  return { availability, devPct, feature, support, total: feature + support };
+}
+
 function loadState(roomId = LOCAL_DEFAULT_ROOM_ID) {
   try {
     const storageKey = roomId === LOCAL_DEFAULT_ROOM_ID ? STORAGE_KEY : `${STORAGE_KEY}-${roomId}`;
@@ -372,6 +456,7 @@ function loadState(roomId = LOCAL_DEFAULT_ROOM_ID) {
     const roomSettings = normalizeRoomSettings(saved.roomSettings, saved.round, normalizedStories);
     return {
       resourceModelVersion: 1,
+      capacity: normalizeCapacityState(saved.capacity),
       sequence: sequences[saved.sequence] ? saved.sequence : defaultState.sequence,
       roomSettings,
       selectedStoryId,
@@ -538,7 +623,7 @@ function getConfiguredRoomId() {
 
 function getViewFromLocation() {
   const view = window.location.hash.replace(/^#/, '').trim().toLowerCase();
-  return ['estimates', 'rooms', 'team', 'resources', 'settings', 'admin'].includes(view) ? view : 'estimates';
+  return ['estimates', 'capacity', 'rooms', 'team', 'resources', 'settings', 'admin'].includes(view) ? view : 'estimates';
 }
 
 function getCurrentRoom() {
@@ -831,6 +916,7 @@ function renderSidebar(view = activeView) {
       <button class="nav-link ${view === 'estimates' ? 'active' : ''}" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${state.stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length}/${state.stories.filter((story) => story.type !== 'Epic').length}</span></button>
       <button class="nav-link ${view === 'team' ? 'active' : ''}" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
       <button class="nav-link ${view === 'resources' ? 'active' : ''}" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
+      <button class="nav-link ${view === 'capacity' ? 'active' : ''}" type="button" data-nav="capacity">${icon('clock')}<span class="nav-link-label">Capacity</span><span class="nav-count">${state.capacity.sprints.length}</span></button>
       <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
       <button class="nav-link ${view === 'settings' ? 'active' : ''}" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
       ${isAdmin() ? `<button class="nav-link ${view === 'admin' ? 'active' : ''}" type="button" data-nav="admin">${icon('shield')}<span class="nav-link-label">Admin users</span><span class="nav-count">${cloud.adminUsers.length || ''}</span></button>` : ''}
@@ -845,7 +931,7 @@ function renderSidebar(view = activeView) {
 }
 
 function renderTopbar(view = activeView) {
-  const labels = { estimates: 'Estimates', team: 'Team', rooms: 'Rooms', resources: 'Resources', settings: 'Room settings', admin: 'Admin users' };
+  const labels = { estimates: 'Estimates', capacity: 'Capacity', team: 'Team', rooms: 'Rooms', resources: 'Resources', settings: 'Room settings', admin: 'Admin users' };
   return `<header class="topbar">
     <div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<span>${escapeHTML(getRoomName())}</span>${icon('chevron')}<span>${labels[view]}</span></div>
     <div class="topbar-actions">
@@ -869,7 +955,7 @@ function renderRoomsPage() {
   </section>
   <section class="management-section">
     <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
-     <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${(room.role === 'owner' || isAdmin()) && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
+     <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${isAdmin() || (room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID) ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
   </section>`;
 }
 
@@ -908,9 +994,73 @@ function renderSettingsPage() {
   </section>`;
 }
 
+function getCapacityMembers() {
+  const members = Array.isArray(state.capacity?.members) ? state.capacity.members : [];
+  if (members.length) return members;
+  const roster = Array.isArray(state.round?.players) ? state.round.players : [];
+  const teamRoster = getSelectedTeam()?.members || [];
+  const fallback = (roster.length ? roster : teamRoster).map((member) => ({ id: member.id, name: member.name, office: 'beirut', trainStaffDevCapacityPct: 0.75 }));
+  if (!fallback.length && cloud.user) fallback.push({ id: cloud.user.id, name: getUserName(), office: 'beirut', trainStaffDevCapacityPct: 0.75 });
+  return fallback;
+}
+
+function renderCapacitySprint(sprint, members, canEdit) {
+  const summary = members.reduce((totals, member) => {
+    const result = capacityForMemberSprint(member, sprint);
+    totals.feature += result.feature;
+    totals.support += result.support;
+    totals.total += result.total;
+    return totals;
+  }, { feature: 0, support: 0, total: 0 });
+  const businessDays = businessDaysInclusive(sprint.startDate, sprint.endDate);
+  const action = canEdit ? '<button class="outline-button danger-outline compact-button" type="button" data-delete-capacity-sprint="' + escapeHTML(sprint.id) + '">' + icon('trash') + 'Remove</button>' : '';
+  const fields = '<div class="capacity-sprint-fields">' +
+    '<label class="modal-field"><span>Name</span><input class="modal-input" data-capacity-sprint-field="name" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + escapeHTML(sprint.name) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>Start</span><input class="modal-input" type="date" data-capacity-sprint-field="startDate" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + escapeHTML(sprint.startDate) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>End</span><input class="modal-input" type="date" data-capacity-sprint-field="endDate" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + escapeHTML(sprint.endDate) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>Beirut holidays</span><input class="modal-input" type="number" min="0" max="366" data-capacity-sprint-field="holidayDaysBeirut" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + sprint.holidayDaysBeirut + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>Cyprus holidays</span><input class="modal-input" type="number" min="0" max="366" data-capacity-sprint-field="holidayDaysCyprus" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + sprint.holidayDaysCyprus + '"' + (canEdit ? '' : ' disabled') + ' /></label></div>';
+  const rows = members.map((member) => {
+    const result = capacityForMemberSprint(member, sprint);
+    return '<tr><td>' + escapeHTML(member.name) + '</td><td>' + (member.office === 'cyprus' ? 'Cyprus' : 'Beirut') + '</td><td>' + Math.round(result.devPct * 100) + '%</td><td><input class="compact-input" type="number" min="0" max="366" data-capacity-availability data-sprint-id="' + escapeHTML(sprint.id) + '" data-member-id="' + escapeHTML(member.id) + '" value="' + result.availability + '"' + (canEdit ? '' : ' disabled') + ' /></td><td>' + result.feature.toFixed(1) + '</td><td>' + result.support.toFixed(1) + '</td><td><strong>' + result.total.toFixed(1) + '</strong></td></tr>';
+  }).join('');
+  return '<section class="card capacity-sprint-card"><div class="section-heading"><div><p class="section-kicker">Sprint</p><h2>' + escapeHTML(sprint.name) + '</h2><p class="settings-copy">' + (sprint.startDate || 'Start date') + ' → ' + (sprint.endDate || 'End date') + ' · ' + businessDays + ' weekdays before holidays</p></div>' + action + '</div>' + fields +
+    '<div class="capacity-summary-grid"><div><span>Features</span><strong>' + summary.feature.toFixed(1) + '</strong></div><div><span>Support / CM</span><strong>' + summary.support.toFixed(1) + '</strong></div><div><span>Total capacity</span><strong>' + summary.total.toFixed(1) + '</strong></div></div>' +
+    '<div class="capacity-table-wrap"><table class="capacity-table"><thead><tr><th>Member</th><th>Office</th><th>Dev %</th><th>Availability days</th><th>Features</th><th>Support / CM</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+}
+
+function renderCapacityPage() {
+  state.capacity = normalizeCapacityState(state.capacity);
+  const members = getCapacityMembers();
+  if (!state.capacity.members.length && members.length) state.capacity.members = structuredClone(members);
+  const canEdit = canModerateRoom();
+  const defaults = state.capacity.defaults;
+  const piTotals = state.capacity.sprints.reduce((totals, sprint) => {
+    members.forEach((member) => {
+      const result = capacityForMemberSprint(member, sprint);
+      totals.feature += result.feature;
+      totals.support += result.support;
+      totals.total += result.total;
+    });
+    return totals;
+  }, { feature: 0, support: 0, total: 0 });
+  const memberRows = members.map((member) => '<div class="capacity-member-row"><div><strong>' + escapeHTML(member.name) + '</strong><small>Derived dev: ' + Math.round(Math.max(0, member.trainStaffDevCapacityPct - defaults.ceremoniesPct) * 100) + '%</small></div><label><span>Office</span><select class="modal-input" data-capacity-member-office="' + escapeHTML(member.id) + '"' + (canEdit ? '' : ' disabled') + '><option value="beirut"' + (member.office === 'beirut' ? ' selected' : '') + '>Beirut</option><option value="cyprus"' + (member.office === 'cyprus' ? ' selected' : '') + '>Cyprus</option></select></label><label><span>Train/staff dev %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-member-dev="' + escapeHTML(member.id) + '" value="' + Math.round(member.trainStaffDevCapacityPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label></div>').join('');
+  const sprints = state.capacity.sprints.map((sprint) => renderCapacitySprint(sprint, members, canEdit)).join('');
+  return '<section class="page-intro"><div><p class="eyebrow">Workspace · capacity planning</p><h1>Plan the PI capacity.</h1><p class="page-intro-copy">Model train/staff development time across sprints, offices, features, and support work.</p></div>' + (canEdit ? '<button class="primary-button" type="button" data-add-capacity-sprint>' + icon('plus') + 'Add sprint</button>' : '') + '</section>' +
+    '<section class="card capacity-summary-card"><div class="section-heading"><div><p class="section-kicker">PI roll-up</p><h2>Planned capacity</h2></div><span class="section-count">' + state.capacity.sprints.length + ' sprints</span></div><div class="capacity-summary-grid"><div><span>Features</span><strong>' + piTotals.feature.toFixed(1) + '</strong></div><div><span>Support / CM</span><strong>' + piTotals.support.toFixed(1) + '</strong></div><div><span>Total capacity</span><strong>' + piTotals.total.toFixed(1) + '</strong></div></div></section>' +
+    '<section class="capacity-layout"><section class="card capacity-defaults-card"><div class="section-heading"><div><p class="section-kicker">Room defaults</p><h2>Capacity rules</h2></div></div><p class="settings-copy">Dev % is train/staff dev capacity minus ceremonies. Feature and support percentages split the remaining dev time.</p><div class="capacity-default-grid">' +
+    '<label class="modal-field"><span>Ceremonies %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="ceremoniesPct" value="' + Math.round(defaults.ceremoniesPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>Features capacity %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="featureCapacityPct" value="' + Math.round(defaults.featureCapacityPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>Support / CM capacity %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="supportCapacityPct" value="' + Math.round(defaults.supportCapacityPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label></div></section>' +
+    '<section class="card capacity-members-card"><div class="section-heading"><div><p class="section-kicker">Team assumptions</p><h2>Members and offices</h2></div><span class="section-count">' + members.length + '</span></div><p class="settings-copy">Assign each member to Beirut or Cyprus and set their train/staff dev capacity. The derived Dev % is used for every sprint.</p><div class="capacity-member-list">' + (memberRows || '<p class="empty-manager">No room members are available yet.</p>') + '</div></section></section>' +
+    (sprints || '<section class="card empty-state capacity-empty-state"><span class="empty-state-icon">+</span><h3>Add the first sprint</h3><p>Set sprint dates and holidays to see office-aware capacity totals.</p></section>');
+}
+
 function renderManagementPage() {
   const content = activeView === 'rooms'
     ? renderRoomsPage()
+    : activeView === 'capacity'
+      ? renderCapacityPage()
     : activeView === 'team'
       ? renderTeamPage()
       : activeView === 'resources'
@@ -961,6 +1111,7 @@ function render() {
         <button class="nav-link active" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${estimableStories.length}</span></button>
         <button class="nav-link" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
         <button class="nav-link" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
+        <button class="nav-link" type="button" data-nav="capacity">${icon('clock')}<span class="nav-link-label">Capacity</span><span class="nav-count">${state.capacity.sprints.length}</span></button>
         <button class="nav-link" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${cloud.rooms.length || 1}</span></button>
         <button class="nav-link" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
         ${isAdmin() ? `<button class="nav-link" type="button" data-nav="admin">${icon('shield')}<span class="nav-link-label">Admin users</span><span class="nav-count">${cloud.adminUsers.length || ''}</span></button>` : ''}
@@ -1315,6 +1466,35 @@ function addImportedStories(stories) {
   showToast(`${imported.length} ${imported.length === 1 ? 'story' : 'stories'} added to the queue`);
 }
 
+function openCapacitySprintModal() {
+  if (!canModerateRoom()) return;
+  const nextNumber = state.capacity.sprints.length + 1;
+  document.querySelector('#modal-root').innerHTML = '<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="capacity-sprint-title"><div class="modal-header"><div><p class="section-kicker">Capacity plan</p><h2 id="capacity-sprint-title">Add a sprint</h2><p>Weekdays are calculated from the dates. Enter office holiday counts manually.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">' + icon('x') + '</button></div><form class="modal-form" data-capacity-sprint-form><label class="modal-field"><span>Sprint name</span><input class="modal-input" name="name" required value="Sprint ' + nextNumber + '" /></label><label class="modal-field"><span>Start date</span><input class="modal-input" type="date" name="startDate" required /></label><label class="modal-field"><span>End date</span><input class="modal-input" type="date" name="endDate" required /></label><div class="capacity-default-grid"><label class="modal-field"><span>Beirut holidays</span><input class="modal-input" type="number" min="0" max="366" name="holidayDaysBeirut" value="0" /></label><label class="modal-field"><span>Cyprus holidays</span><input class="modal-input" type="number" min="0" max="366" name="holidayDaysCyprus" value="0" /></label></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Add sprint ' + icon('plus') + '</button></div></form></section></div>';
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-capacity-sprint-form]').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    state.capacity.sprints.push({
+      id: 'sprint-' + Date.now().toString(36),
+      name: String(form.get('name') || 'Sprint').trim() || 'Sprint',
+      startDate: String(form.get('startDate') || ''),
+      endDate: String(form.get('endDate') || ''),
+      holidayDaysBeirut: Math.max(0, Number(form.get('holidayDaysBeirut')) || 0),
+      holidayDaysCyprus: Math.max(0, Number(form.get('holidayDaysCyprus')) || 0),
+      availabilityDays: {},
+    });
+    saveState();
+    closeModal();
+    activeView = 'capacity';
+    render();
+    showToast('Sprint added to the capacity plan');
+  });
+  document.querySelector('[name="startDate"]').focus();
+}
+
 function bindEvents() {
   hydrateIcons();
   document.querySelector('[data-login-form]')?.addEventListener('submit', loginWithPassword);
@@ -1333,6 +1513,51 @@ function bindEvents() {
     button.addEventListener('click', () => deleteRoomRecord(button.dataset.deleteRoom));
   });
   document.querySelector('[data-create-room]')?.addEventListener('click', openCreateRoomModal);
+  document.querySelector('[data-add-capacity-sprint]')?.addEventListener('click', openCapacitySprintModal);
+  document.querySelectorAll('[data-delete-capacity-sprint]').forEach((button) => button.addEventListener('click', () => {
+    if (!canModerateRoom() || !window.confirm('Remove this sprint from the capacity plan?')) return;
+    state.capacity.sprints = state.capacity.sprints.filter((sprint) => sprint.id !== button.dataset.deleteCapacitySprint);
+    saveState();
+    render();
+  }));
+  document.querySelectorAll('[data-capacity-default]').forEach((input) => input.addEventListener('change', () => {
+    if (!canModerateRoom()) return;
+    state.capacity.defaults[input.dataset.capacityDefault] = clampCapacityPercent(input.value, state.capacity.defaults[input.dataset.capacityDefault]);
+    saveState();
+    render();
+  }));
+  document.querySelectorAll('[data-capacity-member-office]').forEach((input) => input.addEventListener('change', () => {
+    if (!canModerateRoom()) return;
+    const member = state.capacity.members.find((candidate) => candidate.id === input.dataset.capacityMemberOffice);
+    if (member) member.office = input.value === 'cyprus' ? 'cyprus' : 'beirut';
+    saveState();
+    render();
+  }));
+  document.querySelectorAll('[data-capacity-member-dev]').forEach((input) => input.addEventListener('change', () => {
+    if (!canModerateRoom()) return;
+    const member = state.capacity.members.find((candidate) => candidate.id === input.dataset.capacityMemberDev);
+    if (member) member.trainStaffDevCapacityPct = clampCapacityPercent(input.value, member.trainStaffDevCapacityPct);
+    saveState();
+    render();
+  }));
+  document.querySelectorAll('[data-capacity-sprint-field]').forEach((input) => input.addEventListener('change', () => {
+    if (!canModerateRoom()) return;
+    const sprint = state.capacity.sprints.find((candidate) => candidate.id === input.dataset.sprintId);
+    if (!sprint) return;
+    sprint[input.dataset.capacitySprintField] = ['holidayDaysBeirut', 'holidayDaysCyprus'].includes(input.dataset.capacitySprintField)
+      ? Math.max(0, Math.min(366, Number(input.value) || 0))
+      : input.value;
+    saveState();
+    render();
+  }));
+  document.querySelectorAll('[data-capacity-availability]').forEach((input) => input.addEventListener('change', () => {
+    if (!canModerateRoom()) return;
+    const sprint = state.capacity.sprints.find((candidate) => candidate.id === input.dataset.sprintId);
+    if (!sprint) return;
+    sprint.availabilityDays[input.dataset.memberId] = Math.max(0, Math.min(366, Number(input.value) || 0));
+    saveState();
+    render();
+  }));
   document.querySelector('[data-create-team]')?.addEventListener('click', openCreateTeamModal);
   document.querySelectorAll('[data-select-team]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1617,7 +1842,7 @@ async function deleteRoomRecord(roomId) {
     showToast('Only the room owner or a workspace admin can remove a room');
     return;
   }
-  if (room.id === 'pi-24-commerce' || room.id === LOCAL_DEFAULT_ROOM_ID) {
+  if (!isAdmin() && (room.id === 'pi-24-commerce' || room.id === LOCAL_DEFAULT_ROOM_ID)) {
     showToast('The default room cannot be removed');
     return;
   }
@@ -2253,7 +2478,7 @@ function setBreakdown(kind) {
 }
 
 function navigateToView(view) {
-  if (!['estimates', 'rooms', 'team', 'resources', 'settings', 'admin'].includes(view)) return;
+  if (!['estimates', 'capacity', 'rooms', 'team', 'resources', 'settings', 'admin'].includes(view)) return;
   if (view === 'admin' && !isAdmin()) return;
   activeView = view;
   window.history.pushState({}, '', `#${view}`);
@@ -2493,7 +2718,7 @@ function mergeConcurrentState(baseState, localState, remoteState) {
   merged.stories = mergeStateCollection(base.stories, local.stories, remote.stories);
   merged.domains = mergeStateCollection(base.domains, local.domains, remote.domains);
   merged.services = mergeStateCollection(base.services, local.services, remote.services);
-  ['sequence', 'selectedStoryId', 'roomSettings', 'round'].forEach((key) => {
+  ['sequence', 'selectedStoryId', 'roomSettings', 'round', 'capacity'].forEach((key) => {
     if (!statesEqual(local[key], base[key])) merged[key] = structuredClone(local[key]);
   });
   return merged;
@@ -2532,6 +2757,7 @@ function applySiteState(remoteState) {
   const roomSettings = normalizeRoomSettings(remoteState.roomSettings, remoteState.round, stories);
   state = {
     resourceModelVersion: 1,
+    capacity: normalizeCapacityState(remoteState.capacity, remoteState.round?.players || []),
     sequence: sequences[remoteState.sequence] ? remoteState.sequence : defaultState.sequence,
     roomSettings,
     selectedStoryId,

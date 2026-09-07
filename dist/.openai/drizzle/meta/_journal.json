@@ -57,6 +57,13 @@
       "when": 1788808272434,
       "tag": "0007_yielding_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788812665198,
+      "tag": "0008_workable_forge",
+      "breakpoints": true
     }
   ]
 }

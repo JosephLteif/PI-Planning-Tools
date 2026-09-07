@@ -171,6 +171,48 @@ function normalizeLinks(links, serviceIds) {
     .filter((link) => link.serviceId && serviceIds.has(link.serviceId));
 }
 
+function normalizeCapacity(source, roster = []) {
+  const input = source && typeof source === 'object' ? source : {};
+  const defaults = input.defaults && typeof input.defaults === 'object' ? input.defaults : {};
+  const percent = (value, fallback) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(1, Math.max(0, number > 1 ? number / 100 : number));
+  };
+  const members = Array.isArray(input.members) ? input.members.map((member) => ({
+    id: cleanId(member?.id || member?.accountId),
+    name: cleanText(member?.name, 'Planner', 120),
+    office: member?.office === 'cyprus' ? 'cyprus' : 'beirut',
+    trainStaffDevCapacityPct: percent(member?.trainStaffDevCapacityPct, 0.75),
+  })).filter((member) => member.id) : [];
+  const knownIds = new Set(members.map((member) => member.id));
+  roster.forEach((member) => {
+    const id = cleanId(member?.id);
+    if (id && !knownIds.has(id)) {
+      members.push({ id, name: cleanText(member?.name, 'Planner', 120), office: 'beirut', trainStaffDevCapacityPct: 0.75 });
+    }
+  });
+  return {
+    defaults: {
+      ceremoniesPct: percent(defaults.ceremoniesPct, 0.13),
+      featureCapacityPct: percent(defaults.featureCapacityPct, 0.8),
+      supportCapacityPct: percent(defaults.supportCapacityPct, 0.2),
+    },
+    members,
+    sprints: Array.isArray(input.sprints) ? input.sprints.map((sprint) => ({
+      id: cleanId(sprint?.id),
+      name: cleanText(sprint?.name, 'Sprint', 120),
+      startDate: cleanText(sprint?.startDate, '', 20),
+      endDate: cleanText(sprint?.endDate, '', 20),
+      holidayDaysBeirut: Math.max(0, Math.min(366, Number(sprint?.holidayDaysBeirut) || 0)),
+      holidayDaysCyprus: Math.max(0, Math.min(366, Number(sprint?.holidayDaysCyprus) || 0)),
+      availabilityDays: sprint?.availabilityDays && typeof sprint.availabilityDays === 'object'
+        ? Object.fromEntries(Object.entries(sprint.availabilityDays).map(([id, days]) => [cleanId(id), Math.max(0, Math.min(366, Number(days) || 0))]).filter(([id]) => id))
+        : {},
+    })).filter((sprint) => sprint.id) : [],
+  };
+}
+
 function normalizeStateInput(input) {
   const source = input && typeof input === 'object' ? input : {};
   const domains = Array.isArray(source.domains)
@@ -227,9 +269,11 @@ function normalizeStateInput(input) {
     voteMode: roomSettingsSource.voteMode === 'open' ? 'open' : roomSettingsSource.voteMode === 'hidden' ? 'hidden' : roundMode,
     hideVoteCountUntilComplete: roomSettingsSource.hideVoteCountUntilComplete === true || hideVoteCountUntilComplete,
   };
+  const capacity = normalizeCapacity(source.capacity);
 
   return {
     sequence: ALLOWED_SEQUENCES.has(source.sequence) ? source.sequence : 'fibonacci',
+    capacity,
     roomSettings,
     selectedStoryId,
     domains,
@@ -322,8 +366,8 @@ async function ensureDefaultRoomMembership(db, user) {
   const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(DEFAULT_ROOM_ID).first();
   if (!room) {
     const now = new Date().toISOString();
-    await db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?)`)
+    await db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, capacity_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, '{}', ?, ?)`)
       .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, now, now)
       .run();
   }
@@ -525,7 +569,7 @@ async function addRoomMembers(db, user, roomId, input) {
 }
 
 async function readRoomState(db, roomId, userId) {
-  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode, ai_enabled
+  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode, ai_enabled, capacity_json
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
 
@@ -682,6 +726,17 @@ async function readRoomState(db, roomId, userId) {
     aiEnabled: vote.ai_enabled === 1,
     updatedAt: vote.updated_at || null,
   }));
+  let storedCapacity = {};
+  try {
+    storedCapacity = JSON.parse(room.capacity_json || '{}');
+  } catch {
+    storedCapacity = {};
+  }
+  const capacityRoster = rows(memberRosterResult).map((member) => ({
+    id: member.account_id,
+    name: member.display_name || member.email?.split('@')[0] || 'Planner',
+  }));
+  const capacity = normalizeCapacity(storedCapacity, capacityRoster);
 
   return {
     memberCount: Math.max(1, Number(memberResult?.count) || 1),
@@ -695,6 +750,7 @@ async function readRoomState(db, roomId, userId) {
     state: stories.length
       ? {
         resourceModelVersion: 1,
+        capacity,
         sequence: ALLOWED_SEQUENCES.has(room.sequence_key) ? room.sequence_key : 'fibonacci',
         roomSettings: {
           aiEnabled: room.ai_enabled !== 0,
@@ -884,9 +940,9 @@ async function saveRoomState(db, roomId, input, user) {
 
   const now = new Date().toISOString();
   const reservation = await db.prepare(`UPDATE rooms
-    SET state_version = state_version + 1, sequence_key = ?, selected_story_key = ?, vote_mode = ?, ai_enabled = ?, updated_at = ?
+    SET state_version = state_version + 1, sequence_key = ?, selected_story_key = ?, vote_mode = ?, ai_enabled = ?, capacity_json = ?, updated_at = ?
     WHERE id = ? AND state_version = ?`)
-    .bind(source.sequence, source.selectedStoryId, source.round.storageMode, source.roomSettings.aiEnabled ? 1 : 0, now, roomId, currentVersion)
+    .bind(source.sequence, source.selectedStoryId, source.round.storageMode, source.roomSettings.aiEnabled ? 1 : 0, JSON.stringify(source.capacity), now, roomId, currentVersion)
     .run();
   if (Number(reservation?.meta?.changes) !== 1) {
     const error = new Error('This room changed elsewhere. Your latest changes will be merged and retried.');
@@ -967,8 +1023,8 @@ async function createRoom(db, user, input) {
   const roomId = makeId('room');
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?)`)
+    db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, capacity_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, '{}', ?, ?)`)
       .bind(roomId, name, piLabel, user.id, now, now),
     db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
       VALUES (?, ?, 'owner', ?)`)
@@ -984,11 +1040,6 @@ async function deleteRoom(db, user, roomId) {
     error.status = 400;
     throw error;
   }
-  if (roomId === DEFAULT_ROOM_ID) {
-    const error = new Error('The default room cannot be removed');
-    error.status = 400;
-    throw error;
-  }
   const room = await db.prepare('SELECT id, owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
   if (!room) {
     const error = new Error('Room not found');
@@ -1000,11 +1051,9 @@ async function deleteRoom(db, user, roomId) {
     error.status = 403;
     throw error;
   }
-  const roomCount = user.role === 'admin'
-    ? null
-    : await db.prepare('SELECT COUNT(*) AS count FROM room_members WHERE account_id = ?').bind(user.id).first();
-  if (roomCount && Number(roomCount.count) <= 1) {
-    const error = new Error('Keep at least one planning room in your workspace');
+  const roomCount = await db.prepare('SELECT COUNT(*) AS count FROM rooms').first();
+  if (Number(roomCount?.count) <= 1) {
+    const error = new Error('Keep at least one planning room available');
     error.status = 400;
     throw error;
   }
@@ -1017,7 +1066,9 @@ async function deleteRoom(db, user, roomId) {
     db.prepare('DELETE FROM domains WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM room_invites WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM room_members WHERE room_id = ?').bind(roomId),
-    db.prepare('DELETE FROM rooms WHERE id = ? AND owner_account_id = ?').bind(roomId, user.id),
+    user.role === 'admin'
+      ? db.prepare('DELETE FROM rooms WHERE id = ?').bind(roomId)
+      : db.prepare('DELETE FROM rooms WHERE id = ? AND owner_account_id = ?').bind(roomId, user.id),
   ]);
   return { ok: true, roomId };
 }

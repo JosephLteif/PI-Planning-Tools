@@ -3571,6 +3571,162 @@ h1 {
   }
 }
 
+.capacity-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.capacity-default-grid,
+.capacity-sprint-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.capacity-member-list {
+  display: grid;
+  gap: 10px;
+}
+
+.capacity-member-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 150px;
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--canvas);
+}
+
+.capacity-member-row > div {
+  display: grid;
+  gap: 4px;
+  align-self: center;
+}
+
+.capacity-member-row small,
+.capacity-member-row label span {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.capacity-member-row label {
+  display: grid;
+  gap: 5px;
+}
+
+.capacity-sprint-card {
+  margin-bottom: 18px;
+}
+
+.capacity-sprint-fields {
+  grid-template-columns: 1.4fr repeat(4, minmax(100px, 1fr));
+}
+
+.capacity-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.capacity-summary-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--canvas);
+}
+
+.capacity-summary-grid span,
+.capacity-summary-grid strong {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.capacity-summary-grid strong {
+  color: var(--ink);
+  font-size: 20px;
+}
+
+.capacity-table-wrap {
+  overflow-x: auto;
+}
+
+.capacity-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.capacity-table th,
+.capacity-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.capacity-table th {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.capacity-table td {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.capacity-table td:first-child,
+.capacity-table td strong {
+  color: var(--ink);
+}
+
+.compact-input {
+  width: 78px;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.capacity-office {
+  color: var(--ink);
+}
+
+.capacity-empty-state {
+  margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+  .capacity-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .capacity-sprint-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .capacity-member-row,
+  .capacity-sprint-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .capacity-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .room-card-actions {
   display: flex;
   flex-wrap: wrap;
