@@ -3353,8 +3353,14 @@ html[data-theme='dark'] .epic-metrics {
   margin-top: 54px;
 }
 
+.auth-app {
+  min-height: 100vh;
+}
+
 .auth-shell {
   display: grid;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 100vh;
   padding: 30px;
   background: var(--canvas);

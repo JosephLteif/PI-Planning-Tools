@@ -816,11 +816,14 @@ function renderManagementPage() {
 }
 
 function render() {
+  const app = document.querySelector('#app');
   if (siteRuntime.enabled && !cloud.user) {
-    document.querySelector('#app').innerHTML = renderLoginPage();
+    app.className = 'auth-app';
+    app.innerHTML = renderLoginPage();
     bindEvents();
     return;
   }
+  app.className = 'app-shell';
   if (activeView !== 'estimates') {
     renderManagementPage();
     return;

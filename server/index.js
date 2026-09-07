@@ -9,7 +9,7 @@ const USERNAME_PATTERN = /^[a-z][a-z0-9._-]{2,39}$/;
 const SESSION_COOKIE = 'pointline_session';
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_MIN_LENGTH = 12;
-const PASSWORD_ITERATIONS = 120000;
+const PASSWORD_ITERATIONS = 100000;
 const MAX_BODY_BYTES = 1_500_000;
 const STATIC_ASSETS = new Map();
 
