@@ -210,10 +210,11 @@ const siteRuntime = {
   enabled: window.location.hostname.endsWith('.chatgpt.site'),
   ready: false,
   pollTimer: null,
-  saveTimer: null,
-  saveInFlight: false,
+  saveTimers: new Map(),
+  saveInFlight: 0,
   stateRevision: 0,
   syncedRevision: 0,
+  revisionRoomId: cloud.roomId,
   refreshing: false,
 };
 
@@ -323,9 +324,18 @@ function normalizeEstimate(value) {
 }
 
 function saveState() {
+  if (siteRuntime.revisionRoomId !== cloud.roomId) {
+    resetSiteSyncForRoom(cloud.roomId);
+  }
   siteRuntime.stateRevision += 1;
   persistLocalState();
   queueSiteCloudSync();
+}
+
+function resetSiteSyncForRoom(roomId) {
+  siteRuntime.revisionRoomId = roomId;
+  siteRuntime.stateRevision = 0;
+  siteRuntime.syncedRevision = 0;
 }
 
 function persistLocalState() {
@@ -1227,6 +1237,7 @@ async function selectRoom(roomId) {
       cloud.roomId = roomId;
       cloud.room = normalizeRoomRecord(payload.room || room);
       cloud.memberCount = Math.max(1, Number(payload.memberCount) || room.memberCount);
+      resetSiteSyncForRoom(roomId);
       updateRoomUrl(roomId);
       activeView = 'estimates';
       render();
@@ -1261,6 +1272,7 @@ async function createRoomRecord(name, piLabel) {
     cloud.room = room;
     cloud.memberCount = room.memberCount;
     activeRoomId = room.id;
+    resetSiteSyncForRoom(room.id);
     applySiteState(payload.state);
     updateRoomUrl(room.id);
     activeView = 'estimates';
@@ -1653,10 +1665,10 @@ async function siteRequest(path, options = {}) {
   return payload;
 }
 
-function roomScopedApiPath(path) {
-  if (!cloud.roomId) return path;
+function roomScopedApiPath(path, roomId = cloud.roomId) {
+  if (!roomId) return path;
   const url = new URL(path, window.location.href);
-  url.searchParams.set('room', cloud.roomId);
+  url.searchParams.set('room', roomId);
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -1736,33 +1748,47 @@ async function refreshSiteState({ renderAfter = true } = {}) {
 }
 
 function siteStateHasPendingChanges() {
-  return Boolean(siteRuntime.saveTimer || siteRuntime.saveInFlight || siteRuntime.stateRevision > siteRuntime.syncedRevision);
+  return Boolean(
+    siteRuntime.saveTimers.has(cloud.roomId) ||
+    siteRuntime.saveInFlight > 0 ||
+    (siteRuntime.revisionRoomId === cloud.roomId && siteRuntime.stateRevision > siteRuntime.syncedRevision),
+  );
 }
 
 function queueSiteCloudSync() {
   if (!siteRuntime.enabled || !siteRuntime.ready) return;
-  clearTimeout(siteRuntime.saveTimer);
+  const roomId = cloud.roomId;
+  if (!roomId) return;
+  const existingTimer = siteRuntime.saveTimers.get(roomId);
+  if (existingTimer) clearTimeout(existingTimer);
   const revision = siteRuntime.stateRevision;
   const payload = JSON.stringify(siteStatePayload());
-  siteRuntime.saveTimer = window.setTimeout(async () => {
-    siteRuntime.saveTimer = null;
-    siteRuntime.saveInFlight = true;
+  const timer = window.setTimeout(async () => {
+    siteRuntime.saveTimers.delete(roomId);
+    siteRuntime.saveInFlight += 1;
     try {
-      await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: payload });
-      siteRuntime.syncedRevision = Math.max(siteRuntime.syncedRevision, revision);
-      cloud.status = 'synced';
-      updateCloudStatusBadge();
+      await siteRequest(roomScopedApiPath('/api/state', roomId), { method: 'PUT', body: payload });
+      if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
+        siteRuntime.syncedRevision = Math.max(siteRuntime.syncedRevision, revision);
+        cloud.status = 'synced';
+        updateCloudStatusBadge();
+      }
     } catch (error) {
-      cloud.status = error.status === 401 ? 'auth' : 'error';
-      updateCloudStatusBadge();
+      if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
+        cloud.status = error.status === 401 ? 'auth' : 'error';
+        updateCloudStatusBadge();
+      }
       console.warn('Pointline Site state save failed', error);
-      if (error.status !== 401 && siteRuntime.stateRevision >= revision) {
-        window.setTimeout(() => queueSiteCloudSync(), 1000);
+      if (error.status !== 401 && siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId && siteRuntime.stateRevision >= revision) {
+        window.setTimeout(() => {
+          if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) queueSiteCloudSync();
+        }, 1000);
       }
     } finally {
-      siteRuntime.saveInFlight = false;
+      siteRuntime.saveInFlight -= 1;
     }
   }, 250);
+  siteRuntime.saveTimers.set(roomId, timer);
 }
 
 async function syncSiteVote(retry = 0) {
@@ -1844,6 +1870,7 @@ async function initializeSitesBackend() {
     cloud.room = normalizeRoomRecord(me.room);
     cloud.memberCount = Math.max(1, Number(me.memberCount) || 1);
     activeRoomId = cloud.roomId || activeRoomId;
+    resetSiteSyncForRoom(cloud.roomId);
     if (cloud.roomId) localStorage.setItem(ROOM_ID_KEY, cloud.roomId);
 
     const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
