@@ -1963,6 +1963,15 @@ h1 {
   font-size: 9px;
 }
 
+.manager-row .compact-icon {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+}
+
+.manager-row .compact-icon:hover {
+  color: var(--coral);
+}
+
 .manager-dot {
   width: 7px;
   height: 7px;

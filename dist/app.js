@@ -211,6 +211,9 @@ const siteRuntime = {
   ready: false,
   pollTimer: null,
   saveTimer: null,
+  saveInFlight: false,
+  stateRevision: 0,
+  syncedRevision: 0,
   refreshing: false,
 };
 
@@ -300,10 +303,10 @@ function loadState(roomId = LOCAL_DEFAULT_ROOM_ID) {
           ? normalizeServiceLinks(story.serviceLinks)
           : structuredClone(initialStories.find((defaultStory) => defaultStory.id === story.id)?.serviceLinks || []),
       })),
-      domains: Array.isArray(saved.domains) && saved.domains.length
+      domains: Array.isArray(saved.domains)
         ? saved.domains.map((domain) => ({ id: String(domain.id), name: String(domain.name).trim() })).filter((domain) => domain.name)
         : structuredClone(defaultDomains),
-      services: Array.isArray(saved.services) && saved.services.length
+      services: Array.isArray(saved.services)
         ? saved.services.map((service) => ({ id: String(service.id), name: String(service.name).trim(), domainId: service.domainId ? String(service.domainId) : '' })).filter((service) => service.name)
         : structuredClone(defaultServices),
       round: normalizeRound(saved.round, selectedStoryId),
@@ -320,6 +323,7 @@ function normalizeEstimate(value) {
 }
 
 function saveState() {
+  siteRuntime.stateRevision += 1;
   persistLocalState();
   queueSiteCloudSync();
 }
@@ -1198,8 +1202,8 @@ async function refreshWorkspaceData() {
   if (!siteRuntime.ready) return;
   try {
     const [roomsPayload, teamsPayload] = await Promise.all([
-      siteRequest('/api/rooms'),
-      siteRequest('/api/teams'),
+      siteRequest(roomScopedApiPath('/api/rooms')),
+      siteRequest(roomScopedApiPath('/api/teams')),
     ]);
     cloud.rooms = Array.isArray(roomsPayload.rooms) ? roomsPayload.rooms.map(normalizeRoomRecord) : [];
     cloud.teams = Array.isArray(teamsPayload.teams) ? teamsPayload.teams.map(normalizeTeamRecord) : [];
@@ -1247,7 +1251,7 @@ async function selectRoom(roomId) {
 
 async function createRoomRecord(name, piLabel) {
   if (siteRuntime.ready) {
-    const payload = await siteRequest('/api/rooms', {
+    const payload = await siteRequest(roomScopedApiPath('/api/rooms'), {
       method: 'POST',
       body: JSON.stringify({ name, piLabel, state: roomStatePayload(makeEmptyRoomState()) }),
     });
@@ -1302,7 +1306,7 @@ function openCreateRoomModal() {
 
 async function createTeamRecord(name) {
   if (siteRuntime.ready) {
-    const payload = await siteRequest('/api/teams', { method: 'POST', body: JSON.stringify({ name }) });
+    const payload = await siteRequest(roomScopedApiPath('/api/teams'), { method: 'POST', body: JSON.stringify({ name }) });
     const team = normalizeTeamRecord(payload.team);
     cloud.teams = [...cloud.teams.filter((candidate) => candidate.id !== team.id), team];
     cloud.selectedTeamId = team.id;
@@ -1354,7 +1358,7 @@ function getInviteBaseUrl(token) {
 
 async function createInvite(kind, teamId = null) {
   if (siteRuntime.ready) {
-    const payload = await siteRequest('/api/invites', {
+    const payload = await siteRequest(roomScopedApiPath('/api/invites'), {
       method: 'POST',
       body: JSON.stringify({ roomId: cloud.roomId, kind, teamId }),
     });
@@ -1541,6 +1545,31 @@ function removeStoryService(serviceId) {
   render();
 }
 
+function removeDomain(domainId) {
+  const domain = getDomain(domainId);
+  if (!domain) return;
+  state.domains = state.domains.filter((candidate) => candidate.id !== domainId);
+  state.services = state.services.map((service) => service.domainId === domainId ? { ...service, domainId: '' } : service);
+  saveState();
+  render();
+  renderServicesModal();
+  showToast(`${domain.name} domain removed`);
+}
+
+function removeManagedService(serviceId) {
+  const service = getService(serviceId);
+  if (!service) return;
+  state.services = state.services.filter((candidate) => candidate.id !== serviceId);
+  state.stories = state.stories.map((story) => ({
+    ...story,
+    serviceLinks: normalizeServiceLinks(story.serviceLinks).filter((link) => link.serviceId !== serviceId),
+  }));
+  saveState();
+  render();
+  renderServicesModal();
+  showToast(`${service.name} service removed`);
+}
+
 function setBreakdown(kind) {
   document.querySelectorAll('[data-breakdown]').forEach((button) => {
     const active = button.dataset.breakdown === kind;
@@ -1624,6 +1653,13 @@ async function siteRequest(path, options = {}) {
   return payload;
 }
 
+function roomScopedApiPath(path) {
+  if (!cloud.roomId) return path;
+  const url = new URL(path, window.location.href);
+  url.searchParams.set('room', cloud.roomId);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function getVoteIdentity() {
   return cloud.user?.id || participantId;
 }
@@ -1662,10 +1698,10 @@ function applySiteState(remoteState) {
     sequence: sequences[remoteState.sequence] ? remoteState.sequence : defaultState.sequence,
     selectedStoryId,
     stories,
-    domains: Array.isArray(remoteState.domains) && remoteState.domains.length
+    domains: Array.isArray(remoteState.domains)
       ? remoteState.domains.map((domain) => ({ id: String(domain.id), name: String(domain.name).trim() })).filter((domain) => domain.name)
       : structuredClone(defaultDomains),
-    services: Array.isArray(remoteState.services) && remoteState.services.length
+    services: Array.isArray(remoteState.services)
       ? remoteState.services.map((service) => ({ id: String(service.id), name: String(service.name).trim(), domainId: service.domainId ? String(service.domainId) : '' })).filter((service) => service.name)
       : structuredClone(defaultServices),
     round: normalizeRound(remoteState.round, selectedStoryId),
@@ -1679,7 +1715,7 @@ function startSitePolling() {
 }
 
 async function refreshSiteState({ renderAfter = true } = {}) {
-  if (!siteRuntime.ready || siteRuntime.refreshing) return;
+  if (!siteRuntime.ready || siteRuntime.refreshing || siteStateHasPendingChanges()) return;
   siteRuntime.refreshing = true;
   try {
     const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
@@ -1699,18 +1735,32 @@ async function refreshSiteState({ renderAfter = true } = {}) {
   }
 }
 
+function siteStateHasPendingChanges() {
+  return Boolean(siteRuntime.saveTimer || siteRuntime.saveInFlight || siteRuntime.stateRevision > siteRuntime.syncedRevision);
+}
+
 function queueSiteCloudSync() {
   if (!siteRuntime.enabled || !siteRuntime.ready) return;
   clearTimeout(siteRuntime.saveTimer);
+  const revision = siteRuntime.stateRevision;
+  const payload = JSON.stringify(siteStatePayload());
   siteRuntime.saveTimer = window.setTimeout(async () => {
+    siteRuntime.saveTimer = null;
+    siteRuntime.saveInFlight = true;
     try {
-      await siteRequest('/api/state', { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: payload });
+      siteRuntime.syncedRevision = Math.max(siteRuntime.syncedRevision, revision);
       cloud.status = 'synced';
       updateCloudStatusBadge();
     } catch (error) {
       cloud.status = error.status === 401 ? 'auth' : 'error';
       updateCloudStatusBadge();
       console.warn('Pointline Site state save failed', error);
+      if (error.status !== 401 && siteRuntime.stateRevision >= revision) {
+        window.setTimeout(() => queueSiteCloudSync(), 1000);
+      }
+    } finally {
+      siteRuntime.saveInFlight = false;
     }
   }, 250);
 }
@@ -1719,7 +1769,7 @@ async function syncSiteVote(retry = 0) {
   if (!siteRuntime.ready || state.round.phase !== 'voting') return;
   const vote = getOwnVote();
   try {
-    const payload = await siteRequest('/api/vote', {
+    const payload = await siteRequest(roomScopedApiPath('/api/vote'), {
       method: 'PUT',
       body: JSON.stringify({
         storyId: state.round.storyId,
@@ -1746,7 +1796,7 @@ async function syncSiteVote(retry = 0) {
 async function clearSiteVotes() {
   if (!siteRuntime.ready) return;
   try {
-    await siteRequest('/api/votes', {
+    await siteRequest(roomScopedApiPath('/api/votes'), {
       method: 'DELETE',
       body: JSON.stringify({ storyId: state.round.storyId, roundNumber: state.round.roundNumber }),
     });
@@ -1800,10 +1850,11 @@ async function initializeSitesBackend() {
     const payload = await siteRequest(`/api/state${roomId}`);
     cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
     if (!applySiteState(payload.state)) {
-      await siteRequest('/api/state', { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
     } else {
       persistLocalState();
     }
+    siteRuntime.syncedRevision = siteRuntime.stateRevision;
     siteRuntime.ready = true;
     cloud.status = 'synced';
     render();
@@ -1831,7 +1882,7 @@ function openServicesModal() {
 
 function renderServicesModal() {
   const domainOptions = `<option value="">No domain yet</option>${state.domains.map((domain) => `<option value="${escapeHTML(domain.id)}">${escapeHTML(domain.name)}</option>`).join('')}`;
-  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="services-title"><div class="modal-header"><div><h2 id="services-title">Manage services</h2><p>Keep the ownership map close to the work. A service can belong to one domain, and stories can split their points across services.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><div class="service-manager-grid"><div class="service-manager-column"><div class="manager-heading"><div><strong>Domains</strong><span>${state.domains.length} configured</span></div></div><form class="manager-form" data-domain-form><input class="modal-input" name="name" required maxlength="80" placeholder="e.g. Customer experience" aria-label="Domain name" /><button class="primary-button" type="submit">${icon('plus')}Add</button></form><div class="manager-list">${state.domains.length ? state.domains.map((domain) => `<div class="manager-row"><span class="manager-dot"></span><strong>${escapeHTML(domain.name)}</strong></div>`).join('') : '<p class="empty-manager">No domains yet.</p>'}</div></div><div class="service-manager-column"><div class="manager-heading"><div><strong>Services</strong><span>${state.services.length} configured</span></div></div><form class="manager-form manager-service-form" data-service-form><input class="modal-input" name="name" required maxlength="80" placeholder="e.g. Checkout API" aria-label="Service name" /><select class="modal-input" name="domainId" aria-label="Service domain">${domainOptions}</select><button class="primary-button" type="submit">${icon('plus')}Add</button></form><div class="manager-list">${state.services.length ? state.services.map((service) => `<div class="manager-row manager-service-row"><span><strong>${escapeHTML(service.name)}</strong><small>${escapeHTML(getDomain(service.domainId)?.name || 'No domain')}</small></span><select class="manager-domain-select" data-service-domain="${escapeHTML(service.id)}" aria-label="Domain for ${escapeHTML(service.name)}">${domainOptions.replace(`value="${escapeHTML(service.domainId || '')}"`, `value="${escapeHTML(service.domainId || '')}" selected`)}</select></div>`).join('') : '<p class="empty-manager">No services yet.</p>'}</div></div></div><p class="manager-note">Archived history is kept when you change a domain. Service allocation uses the saved manual estimate only.</p><div class="modal-footer"><button class="primary-button" type="button" data-close-modal>Done</button></div></section></div>`;
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="services-title"><div class="modal-header"><div><h2 id="services-title">Manage services</h2><p>Keep the ownership map close to the work. A service can belong to one domain, and stories can split their points across services.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><div class="service-manager-grid"><div class="service-manager-column"><div class="manager-heading"><div><strong>Domains</strong><span>${state.domains.length} configured</span></div></div><form class="manager-form" data-domain-form><input class="modal-input" name="name" required maxlength="80" placeholder="e.g. Customer experience" aria-label="Domain name" /><button class="primary-button" type="submit">${icon('plus')}Add</button></form><div class="manager-list">${state.domains.length ? state.domains.map((domain) => `<div class="manager-row"><span class="manager-dot"></span><span class="manager-row-copy"><strong>${escapeHTML(domain.name)}</strong></span><button class="icon-button compact-icon" type="button" data-remove-domain="${escapeHTML(domain.id)}" aria-label="Remove ${escapeHTML(domain.name)}">${icon('x')}</button></div>`).join('') : '<p class="empty-manager">No domains yet.</p>'}</div></div><div class="service-manager-column"><div class="manager-heading"><div><strong>Services</strong><span>${state.services.length} configured</span></div></div><form class="manager-form manager-service-form" data-service-form><input class="modal-input" name="name" required maxlength="80" placeholder="e.g. Checkout API" aria-label="Service name" /><select class="modal-input" name="domainId" aria-label="Service domain">${domainOptions}</select><button class="primary-button" type="submit">${icon('plus')}Add</button></form><div class="manager-list">${state.services.length ? state.services.map((service) => `<div class="manager-row manager-service-row"><span><strong>${escapeHTML(service.name)}</strong><small>${escapeHTML(getDomain(service.domainId)?.name || 'No domain')}</small></span><select class="manager-domain-select" data-service-domain="${escapeHTML(service.id)}" aria-label="Domain for ${escapeHTML(service.name)}">${domainOptions.replace(`value="${escapeHTML(service.domainId || '')}"`, `value="${escapeHTML(service.domainId || '')}" selected`)}</select><button class="icon-button compact-icon" type="button" data-remove-managed-service="${escapeHTML(service.id)}" aria-label="Remove ${escapeHTML(service.name)}">${icon('x')}</button></div>`).join('') : '<p class="empty-manager">No services yet.</p>'}</div></div></div><p class="manager-note">Removing a domain leaves its services unassigned. Removing a service clears it from story allocations but keeps story history.</p><div class="modal-footer"><button class="primary-button" type="button" data-close-modal>Done</button></div></section></div>`;
 
   document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
   document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
@@ -1874,6 +1925,12 @@ function renderServicesModal() {
       render();
       renderServicesModal();
     });
+  });
+  document.querySelectorAll('[data-remove-domain]').forEach((button) => {
+    button.addEventListener('click', () => removeDomain(button.dataset.removeDomain));
+  });
+  document.querySelectorAll('[data-remove-managed-service]').forEach((button) => {
+    button.addEventListener('click', () => removeManagedService(button.dataset.removeManagedService));
   });
 }
 
