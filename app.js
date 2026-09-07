@@ -869,14 +869,14 @@ function renderRoomsPage() {
   </section>
   <section class="management-section">
     <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
-    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
+     <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${(room.role === 'owner' || isAdmin()) && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
   </section>`;
 }
 
 function renderAdminPage() {
   const credentials = cloud.lastCreatedCredentials;
   const credentialText = credentials ? `Username: ${credentials.username}\nPassword: ${credentials.password}\nPointline: ${window.location.origin}` : '';
-  return `<section class="page-intro"><div><p class="eyebrow">Workspace · administration</p><h1>Manage Pointline users.</h1><p class="page-intro-copy">Create member accounts, then copy their credentials to share privately. Passwords are never shown again after you leave this page.</p></div></section><section class="admin-layout"><section class="card admin-create-card"><div class="section-heading"><div><p class="section-kicker">New account</p><h2>Create a user</h2></div></div><form class="admin-user-form" data-admin-user-form><label class="modal-field"><span>Display name</span><input class="modal-input" name="displayName" required maxlength="120" placeholder="e.g. Alex Morgan" /></label><label class="modal-field"><span>Username</span><input class="modal-input" name="username" required minlength="3" maxlength="40" pattern="[A-Za-z][A-Za-z0-9._-]{2,39}" autocapitalize="none" spellcheck="false" placeholder="e.g. alex.morgan" /></label><label class="modal-field"><span>Temporary password</span><input class="modal-input" type="password" name="password" required minlength="12" maxlength="200" autocomplete="new-password" placeholder="At least 12 characters" /></label><button class="primary-button" type="submit">Create credentials ${icon('plus')}</button></form>${credentials ? `<div class="credential-callout"><div><p class="section-kicker">Ready to share</p><h3>${escapeHTML(credentials.username)}’s credentials</h3><p>Copy this once and send it through your normal private channel.</p></div><pre>${escapeHTML(credentialText)}</pre><button class="outline-button" type="button" data-copy-credentials="${escapeHTML(credentialText)}">${icon('copy')}Copy credentials</button></div>` : ''}</section><section class="card admin-users-card"><div class="section-heading"><div><p class="section-kicker">Accounts</p><h2>Pointline users</h2></div><span class="section-count">${cloud.adminUsers.length}</span></div><div class="admin-user-list">${cloud.adminUsers.length ? cloud.adminUsers.map((user) => `<div class="admin-user-row"><span class="avatar small-avatar">${escapeHTML(getInitials(user.name))}</span><span><strong>${escapeHTML(user.name)}</strong><small>${escapeHTML(user.username)} · ${user.role === 'admin' ? 'Administrator' : 'Member'}</small></span><span class="member-role">${user.disabled ? 'Disabled' : 'Active'}</span></div>`).join('') : '<p class="empty-manager">No username accounts yet.</p>'}</div></section></section>`;
+  return `<section class="page-intro"><div><p class="eyebrow">Workspace · administration</p><h1>Manage Pointline users.</h1><p class="page-intro-copy">Create member accounts, then copy their credentials to share privately. Passwords are never shown again after you leave this page.</p></div></section><section class="admin-layout"><section class="card admin-create-card"><div class="section-heading"><div><p class="section-kicker">New account</p><h2>Create a user</h2></div></div><form class="admin-user-form" data-admin-user-form><label class="modal-field"><span>Display name</span><input class="modal-input" name="displayName" required maxlength="120" placeholder="e.g. Alex Morgan" /></label><label class="modal-field"><span>Username</span><input class="modal-input" name="username" required minlength="3" maxlength="40" pattern="[A-Za-z][A-Za-z0-9._-]{2,39}" autocapitalize="none" spellcheck="false" placeholder="e.g. alex.morgan" /></label><label class="modal-field"><span>Temporary password</span><input class="modal-input" type="password" name="password" required minlength="12" maxlength="200" autocomplete="new-password" placeholder="At least 12 characters" /></label><button class="primary-button" type="submit">Create credentials ${icon('plus')}</button></form>${credentials ? `<div class="credential-callout"><div><p class="section-kicker">Ready to share</p><h3>${escapeHTML(credentials.username)}’s credentials</h3><p>Copy this once and send it through your normal private channel.</p></div><pre>${escapeHTML(credentialText)}</pre><button class="outline-button" type="button" data-copy-credentials="${escapeHTML(credentialText)}">${icon('copy')}Copy credentials</button></div>` : ''}</section><section class="card admin-users-card"><div class="section-heading"><div><p class="section-kicker">Accounts</p><h2>Pointline users</h2></div><span class="section-count">${cloud.adminUsers.length}</span></div><div class="admin-user-list">${cloud.adminUsers.length ? cloud.adminUsers.map((user) => `<div class="admin-user-row"><span class="avatar small-avatar">${escapeHTML(getInitials(user.name))}</span><span><strong>${escapeHTML(user.name)}</strong><small>${escapeHTML(user.username)} · ${user.role === 'admin' ? 'Administrator' : 'Member'}</small></span><span class="member-role">${user.disabled ? 'Disabled' : 'Active'}</span><button class="outline-button compact-button admin-edit-button" type="button" data-edit-admin-user="${escapeHTML(user.id)}">Edit</button></div>`).join('') : '<p class="empty-manager">No username accounts yet.</p>'}</div></section></section>`;
 }
 
 function getSelectedTeam() {
@@ -1319,6 +1319,7 @@ function bindEvents() {
   hydrateIcons();
   document.querySelector('[data-login-form]')?.addEventListener('submit', loginWithPassword);
   document.querySelector('[data-admin-user-form]')?.addEventListener('submit', createUserFromAdmin);
+  document.querySelectorAll('[data-edit-admin-user]').forEach((button) => button.addEventListener('click', () => openEditUserModal(button.dataset.editAdminUser)));
   document.querySelector('[data-copy-credentials]')?.addEventListener('click', (event) => copyText(event.currentTarget.dataset.copyCredentials, 'Credentials copied'));
 
   document.querySelectorAll('[data-nav]').forEach((button) => {
@@ -1612,8 +1613,8 @@ async function selectRoom(roomId) {
 
 async function deleteRoomRecord(roomId) {
   const room = cloud.rooms.find((candidate) => candidate.id === roomId);
-  if (!room || room.role !== 'owner') {
-    showToast('Only a room owner can remove a room');
+  if (!room || (room.role !== 'owner' && !isAdmin())) {
+    showToast('Only the room owner or a workspace admin can remove a room');
     return;
   }
   if (room.id === 'pi-24-commerce' || room.id === LOCAL_DEFAULT_ROOM_ID) {
@@ -2371,6 +2372,46 @@ async function createUserFromAdmin(event) {
   } catch (error) {
     if (submit) submit.disabled = false;
     showToast(error.message || 'User could not be created');
+  }
+}
+
+function openEditUserModal(userId) {
+  const user = cloud.adminUsers.find((candidate) => candidate.id === userId);
+  if (!user) return;
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-user-title"><div class="modal-header"><div><p class="section-kicker">Account settings</p><h2 id="edit-user-title">Edit ${escapeHTML(user.name)}</h2><p>Change the display name or username. Leave the new password blank to keep it unchanged.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-admin-user-edit="${escapeHTML(user.id)}"><div class="modal-field"><label for="edit-user-display-name">Display name</label><input id="edit-user-display-name" class="modal-input" name="displayName" required maxlength="120" value="${escapeHTML(user.name)}" /></div><div class="modal-field"><label for="edit-user-username">Username</label><input id="edit-user-username" class="modal-input" name="username" required minlength="3" maxlength="40" pattern="[A-Za-z][A-Za-z0-9._-]{2,39}" autocapitalize="none" spellcheck="false" value="${escapeHTML(user.username)}" /></div><div class="modal-field"><label for="edit-user-password">New password <span class="field-optional">(optional)</span></label><input id="edit-user-password" class="modal-input" type="password" name="password" minlength="12" maxlength="200" autocomplete="new-password" placeholder="At least 12 characters" /></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Save account ${icon('check')}</button></div></form></section></div>`;
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-admin-user-edit]').addEventListener('submit', updateUserFromAdmin);
+  document.querySelector('#edit-user-display-name').focus();
+}
+
+async function updateUserFromAdmin(event) {
+  event.preventDefault();
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  const userId = formElement.dataset.adminUserEdit;
+  const displayName = String(form.get('displayName') || '').trim();
+  const username = String(form.get('username') || '').trim();
+  const password = String(form.get('password') || '');
+  const submit = formElement.querySelector('[type="submit"]');
+  if (!displayName || !username) return;
+  submit.disabled = true;
+  try {
+    const payload = await siteRequest(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ displayName, username, password }),
+    });
+    cloud.adminUsers = cloud.adminUsers.map((user) => user.id === payload.user?.id ? { ...user, ...payload.user } : user);
+    if (cloud.user?.id === payload.user?.id) cloud.user = { ...cloud.user, ...payload.user };
+    cloud.lastCreatedCredentials = payload.credentials || null;
+    closeModal();
+    render();
+    showToast(payload.credentials ? 'Account updated — share the new credentials privately' : 'Account updated');
+  } catch (error) {
+    submit.disabled = false;
+    showToast(error.message || 'User could not be updated');
   }
 }
 

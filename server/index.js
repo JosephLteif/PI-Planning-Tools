@@ -410,6 +410,37 @@ async function createManagedUser(db, user, input) {
   };
 }
 
+async function updateManagedUser(db, user, accountId, input) {
+  requireAdmin(user);
+  const account = await db.prepare(`SELECT id, username, email, display_name, role
+    FROM accounts WHERE id = ? AND username IS NOT NULL LIMIT 1`).bind(accountId).first();
+  if (!account) throw authError('User not found', 404);
+
+  const username = input?.username === undefined ? account.username : validateUsername(input.username);
+  const displayName = cleanText(input?.displayName, account.display_name || username, 120);
+  const password = String(input?.password || '');
+  const existing = await db.prepare('SELECT id FROM accounts WHERE username = ? AND id != ? LIMIT 1')
+    .bind(username, accountId).first();
+  if (existing) throw authError('That username is already in use', 409);
+
+  const now = new Date().toISOString();
+  if (password) {
+    const passwordRecord = await createPasswordRecord(validatePassword(password));
+    await db.prepare(`UPDATE accounts SET username = ?, email = ?, display_name = ?, password_hash = ?, password_salt = ?, updated_at = ?
+      WHERE id = ?`).bind(username, `${username}@pointline.local`, displayName, passwordRecord.hash, passwordRecord.salt, now, accountId).run();
+  } else {
+    await db.prepare(`UPDATE accounts SET username = ?, email = ?, display_name = ?, updated_at = ?
+      WHERE id = ?`).bind(username, `${username}@pointline.local`, displayName, now, accountId).run();
+  }
+
+  const updated = await db.prepare(`SELECT id, username, email, display_name, role
+    FROM accounts WHERE id = ? LIMIT 1`).bind(accountId).first();
+  return {
+    user: accountUser(updated),
+    credentials: password ? { username, password } : null,
+  };
+}
+
 async function requireMember(db, roomId, user) {
   if (user?.role === 'admin') {
     const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
@@ -964,13 +995,15 @@ async function deleteRoom(db, user, roomId) {
     error.status = 404;
     throw error;
   }
-  if (room.owner_account_id !== user.id) {
+  if (user.role !== 'admin' && room.owner_account_id !== user.id) {
     const error = new Error('Only the room owner can remove this room');
     error.status = 403;
     throw error;
   }
-  const roomCount = await db.prepare('SELECT COUNT(*) AS count FROM room_members WHERE account_id = ?').bind(user.id).first();
-  if (Number(roomCount?.count) <= 1) {
+  const roomCount = user.role === 'admin'
+    ? null
+    : await db.prepare('SELECT COUNT(*) AS count FROM room_members WHERE account_id = ?').bind(user.id).first();
+  if (roomCount && Number(roomCount.count) <= 1) {
     const error = new Error('Keep at least one planning room in your workspace');
     error.status = 400;
     throw error;
@@ -1153,6 +1186,12 @@ async function handleApi(request, env) {
   if (url.pathname === '/api/admin/users' && request.method === 'POST') {
     const result = await createManagedUser(env.DB, user, await readJson(request));
     return json({ ok: true, ...result }, 201);
+  }
+  const adminUserPathMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+  if (adminUserPathMatch && (request.method === 'PUT' || request.method === 'PATCH')) {
+    const accountId = decodeURIComponent(adminUserPathMatch[1]);
+    const result = await updateManagedUser(env.DB, user, accountId, await readJson(request));
+    return json({ ok: true, ...result });
   }
   if (url.pathname === '/api/invites' && request.method === 'POST') {
     return json(await createInvite(env.DB, request, user, await readJson(request)), 201);

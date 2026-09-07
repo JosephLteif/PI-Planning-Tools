@@ -4113,6 +4113,10 @@ html[data-theme='dark'] .history-detail {
   font-size: 10px;
 }
 
+.admin-edit-button {
+  flex: 0 0 auto;
+}
+
 .page-intro {
   display: flex;
   align-items: flex-end;
