@@ -424,7 +424,10 @@ async function handleApi(request, env) {
 }
 
 async function serveStatic(request, env) {
-  if (env.ASSETS && typeof env.ASSETS.fetch === 'function') return env.ASSETS.fetch(request);
+  if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
+    const platformResponse = await env.ASSETS.fetch(request);
+    if (platformResponse.status !== 404) return platformResponse;
+  }
   const requestedPath = new URL(request.url).pathname;
   const assetPath = requestedPath === '/' ? '/index.html' : requestedPath;
   const asset = STATIC_ASSETS.get(assetPath);
