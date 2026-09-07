@@ -2235,11 +2235,14 @@ h1 {
 }
 
 .manager-service-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 145px) 28px;
   gap: 10px;
 }
 
 .manager-domain-select {
   width: 145px;
+  max-width: 100%;
   color: var(--ink-muted);
   font-size: 9px;
 }
@@ -2620,6 +2623,14 @@ h1 {
     padding-right: 15px;
     padding-left: 15px;
   }
+
+  .service-manager-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    overflow-y: auto;
+  }
 }
 
 @media (max-width: 900px) {
@@ -2977,6 +2988,21 @@ h1 {
   .manager-service-form button {
     grid-column: 2;
     grid-row: 2;
+  }
+
+  .manager-service-row {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  .manager-service-row .manager-domain-select {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .manager-service-row .compact-icon {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .toast {
