@@ -385,9 +385,13 @@ async function createManagedUser(db, user, input) {
   };
 }
 
-async function requireMember(db, roomId, userId) {
+async function requireMember(db, roomId, user) {
+  if (user?.role === 'admin') {
+    const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+    if (room) return { role: 'admin' };
+  }
   const member = await db.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
-    .bind(roomId, userId)
+    .bind(roomId, user?.id)
     .first();
   if (!member) {
     const error = new Error('You do not have access to this planning room');
@@ -562,20 +566,27 @@ async function readRoomState(db, roomId, userId) {
   };
 }
 
-async function readRooms(db, userId) {
-  const result = await db.prepare(`SELECT r.id, r.name, r.pi_label, r.owner_account_id,
-      COUNT(all_members.account_id) AS member_count, mine.role
-    FROM rooms r
-    JOIN room_members mine ON mine.room_id = r.id AND mine.account_id = ?
-    LEFT JOIN room_members all_members ON all_members.room_id = r.id
-    GROUP BY r.id, r.name, r.pi_label, r.owner_account_id, mine.role
-    ORDER BY r.updated_at DESC, r.id`).bind(userId).all();
+async function readRooms(db, user) {
+  const result = user.role === 'admin'
+    ? await db.prepare(`SELECT r.id, r.name, r.pi_label, r.owner_account_id,
+        COUNT(all_members.account_id) AS member_count, 'admin' AS role
+      FROM rooms r
+      LEFT JOIN room_members all_members ON all_members.room_id = r.id
+      GROUP BY r.id, r.name, r.pi_label, r.owner_account_id
+      ORDER BY r.updated_at DESC, r.id`).all()
+    : await db.prepare(`SELECT r.id, r.name, r.pi_label, r.owner_account_id,
+        COUNT(all_members.account_id) AS member_count, mine.role
+      FROM rooms r
+      JOIN room_members mine ON mine.room_id = r.id AND mine.account_id = ?
+      LEFT JOIN room_members all_members ON all_members.room_id = r.id
+      GROUP BY r.id, r.name, r.pi_label, r.owner_account_id, mine.role
+      ORDER BY r.updated_at DESC, r.id`).bind(user.id).all();
   return rows(result).map((room) => ({
     id: room.id,
     name: room.name,
     piLabel: room.pi_label,
     memberCount: Math.max(1, Number(room.member_count) || 1),
-    role: room.owner_account_id === userId ? 'owner' : room.role === 'owner' ? 'owner' : 'member',
+    role: user.role === 'admin' ? 'admin' : room.owner_account_id === user.id ? 'owner' : room.role === 'owner' ? 'owner' : 'member',
   }));
 }
 
@@ -802,7 +813,7 @@ async function createInvite(db, request, user, input) {
     error.status = 400;
     throw error;
   }
-  if (roomId) await requireMember(db, roomId, user.id);
+  if (roomId) await requireMember(db, roomId, user);
   if (teamId) await requireTeamMember(db, teamId, user.id);
 
   const token = makeId('invite');
@@ -888,10 +899,10 @@ async function handleApi(request, env) {
   }
 
   if (url.pathname === '/api/rooms' && request.method === 'GET') {
-    return json({ rooms: await readRooms(env.DB, user.id) });
+    return json({ rooms: await readRooms(env.DB, user) });
   }
 
-  await requireMember(env.DB, roomId, user.id);
+  await requireMember(env.DB, roomId, user);
 
   if (url.pathname === '/api/me' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);
