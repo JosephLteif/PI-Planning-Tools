@@ -195,6 +195,7 @@ let activeView = getViewFromLocation();
 let state = loadState(activeRoomId);
 let toastTimer;
 let importDraft = { mode: 'text', text: '', fileName: '' };
+let storyEditorDraft = null;
 let cloud = {
   user: null,
   roomId: activeRoomId,
@@ -360,6 +361,9 @@ function icon(name, className = '') {
     plus: '<path d="M12 5v14M5 12h14"/>',
     chevron: '<path d="m9 18 6-6-6-6"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',
+    chevronUp: '<path d="m6 15 6-6 6 6"/>',
+    edit: '<path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
+    trash: '<path d="M4 7h16M10 11v5M14 11v5M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.2-1.2"/>',
     bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/>',
@@ -562,7 +566,7 @@ function renderVotePanel(story) {
   const modeButtons = `<div class="vote-mode-control" role="group" aria-label="Voting visibility"><button class="mode-button ${round.mode === 'hidden' ? 'active' : ''}" type="button" data-vote-mode="hidden">${icon('lock')}Hidden</button><button class="mode-button ${round.mode === 'open' ? 'active' : ''}" type="button" data-vote-mode="open">${icon('eye')}Open</button></div>`;
 
   if (round.phase === 'idle') {
-    return `<section class="vote-panel"><div class="vote-panel-heading"><div><p class="section-kicker">Team round</p><h3>Estimate without anchoring</h3><p>Start a round so everyone can choose a card at the same time. Hidden mode keeps values private until reveal.</p></div>${modeButtons}</div><div class="vote-panel-footer"><span class="vote-status">${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${round.mode === 'hidden' ? 'Votes stay face down until reveal' : 'Votes are visible as they arrive'}</span><button class="primary-button" type="button" data-start-voting>${icon('play')}Start ${round.mode === 'hidden' ? 'hidden' : 'open'} round</button></div></section>`;
+    return `<div class="vote-panel"><div class="vote-panel-heading"><div><p class="section-kicker">Round ready</p><h3>Estimate without anchoring</h3><p>Start a round so everyone can choose a card at the same time. Hidden mode keeps values private until reveal.</p></div>${modeButtons}</div><div class="vote-panel-footer"><span class="vote-status">${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${round.mode === 'hidden' ? 'Votes stay face down until reveal' : 'Votes are visible as they arrive'}</span><button class="primary-button" type="button" data-start-voting>${icon('play')}Start ${round.mode === 'hidden' ? 'hidden' : 'open'} round</button></div></div>`;
   }
 
   const isRevealed = round.phase === 'revealed';
@@ -571,38 +575,34 @@ function renderVotePanel(story) {
   const voteStatus = isRevealed
     ? `${icon('check')} Votes revealed · ${voteCount} ${voteCount === 1 ? 'vote' : 'votes'}`
     : `${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${voteCount} ${voteCount === 1 ? 'vote' : 'votes'} in · ${round.mode === 'hidden' ? 'values hidden' : 'live results'}`;
-  return `<section class="vote-panel ${isRevealed ? 'is-revealed' : ''}"><div class="vote-panel-heading"><div><p class="section-kicker">${isRevealed ? 'Round result' : 'Voting in progress'}</p><h3>${isRevealed ? 'Compare the room' : 'Choose your card'}</h3><p>${isRevealed ? 'The room can now compare perspectives and agree a final estimate.' : 'Flip your card, choose a manual value, and optionally add an AI second opinion.'}</p></div>${modeButtons}</div>${isRevealed ? renderVoteResults(entries) : `<div class="vote-card ${round.cardFlipped ? 'is-flipped' : ''}" data-vote-card><div class="vote-card-inner"><div class="vote-card-face vote-card-front"><span class="vote-card-lock">${icon(round.mode === 'hidden' ? 'lock' : 'eye')}</span><strong>${round.mode === 'hidden' ? 'Your vote is private' : 'Open voting'}</strong><span>${round.mode === 'hidden' ? 'Flip the card when you are ready to vote.' : 'Choose a value and the room can see it.'}</span></div><div class="vote-card-face vote-card-back"><div class="vote-fields">${renderVoteField('manual', ownVote)}${renderVoteField('ai', ownVote)}</div></div></div></div>`}<div class="vote-panel-footer"><span class="vote-status">${voteStatus}</span><div class="vote-actions">${!isRevealed ? `<button class="outline-button" type="button" data-flip-card aria-pressed="${round.cardFlipped}">${icon('flip')}Flip card</button>` : ''}${!isRevealed ? `<button class="primary-button" type="button" data-reveal-votes ${canReveal ? '' : 'disabled'}>${icon('eye')}Reveal votes</button>` : ''}<button class="outline-button" type="button" data-clear-votes>${icon('refresh')}Clear votes</button>${isRevealed ? '<button class="outline-button" type="button" data-reset-round>New round</button>' : ''}</div></div>${visibleEntries.length && !isRevealed ? renderVoteResults(visibleEntries) : ''}</section>`;
+  return `<div class="vote-panel ${isRevealed ? 'is-revealed' : ''}"><div class="vote-panel-heading"><div><p class="section-kicker">${isRevealed ? 'Round result' : 'Voting in progress'}</p><h3>${isRevealed ? 'Compare the room' : 'Choose your card'}</h3><p>${isRevealed ? 'The room can now compare perspectives and agree a final estimate.' : 'Flip your card, choose a manual value, and optionally add an AI second opinion.'}</p></div>${modeButtons}</div>${isRevealed ? renderVoteResults(entries) : `<div class="vote-card ${round.cardFlipped ? 'is-flipped' : ''}" data-vote-card><div class="vote-card-inner"><div class="vote-card-face vote-card-front"><span class="vote-card-lock">${icon(round.mode === 'hidden' ? 'lock' : 'eye')}</span><strong>${round.mode === 'hidden' ? 'Your vote is private' : 'Open voting'}</strong><span>${round.mode === 'hidden' ? 'Flip the card when you are ready to vote.' : 'Choose a value and the room can see it.'}</span></div><div class="vote-card-face vote-card-back"><div class="vote-fields">${renderVoteField('manual', ownVote)}${renderVoteField('ai', ownVote)}</div></div></div></div>`}<div class="vote-panel-footer"><span class="vote-status">${voteStatus}</span><div class="vote-actions">${!isRevealed ? `<button class="outline-button" type="button" data-flip-card aria-pressed="${round.cardFlipped}">${icon('flip')}Flip card</button>` : ''}${!isRevealed ? `<button class="primary-button" type="button" data-reveal-votes ${canReveal ? '' : 'disabled'}>${icon('eye')}Reveal votes</button>` : ''}<button class="outline-button" type="button" data-clear-votes>${icon('refresh')}Clear votes</button>${isRevealed ? '<button class="outline-button" type="button" data-reset-round>New round</button>' : ''}</div></div>${visibleEntries.length && !isRevealed ? renderVoteResults(visibleEntries) : ''}</div>`;
 }
 
 function renderAllocationCard() {
   return `<section class="card allocation-card" id="allocation-card"><div class="lower-card-heading"><div><h2>Resource allocation</h2><p>Manual story points mapped to the services doing the work.</p></div><button class="outline-button" type="button" data-manage-services>${icon('layers')}Manage services</button></div><div class="allocation-tabs" role="tablist" aria-label="Allocation breakdown"><button class="allocation-tab active" type="button" data-breakdown="service" role="tab" aria-selected="true">By service</button><button class="allocation-tab" type="button" data-breakdown="domain" role="tab" aria-selected="false">By domain</button></div><div class="allocation-breakdown" data-breakdown-panel="service">${renderBreakdownRows('service')}</div><div class="allocation-breakdown" data-breakdown-panel="domain" hidden>${renderBreakdownRows('domain')}</div><p class="allocation-note">Only saved manual estimates count. Unestimated work is excluded until it has a team value; incomplete service links leave the remainder Unassigned.</p></section>`;
 }
 
-function renderSidebar(view = activeView) {
+function renderRoomSelector() {
   const room = getCurrentRoom();
+  return `<div class="room-context"><span class="room-context-label">Current room</span><button class="room-selector" type="button" data-nav="rooms" aria-label="Change planning room"><span class="room-dot"></span><span class="room-selector-copy"><strong>${escapeHTML(room.name)}</strong><span>${escapeHTML(room.piLabel)} · ${cloud.status === 'local' ? 'Local room' : 'Shared room'}</span></span><span class="room-selector-action">Change</span></button></div>`;
+}
+
+function renderSidebar(view = activeView) {
   const roomCount = cloud.rooms.length || 1;
   return `<aside class="sidebar">
     <div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div>
     <p class="sidebar-kicker">Planning workspace</p>
-    <button class="room-selector" type="button" data-nav="rooms" aria-label="Open rooms">
-      <span class="room-dot"></span>
-      <span class="room-selector-copy"><strong>${escapeHTML(room.name)}</strong><span>${escapeHTML(room.piLabel)} · ${cloud.status === 'local' ? 'Local room' : 'Shared room'}</span></span>
-      ${icon('chevronDown')}
-    </button>
+    ${renderRoomSelector()}
 
     <nav class="sidebar-nav" aria-label="Workspace navigation">
       <button class="nav-link ${view === 'estimates' ? 'active' : ''}" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${state.stories.filter((story) => story.manual !== null).length}/${state.stories.length}</span></button>
       <button class="nav-link ${view === 'team' ? 'active' : ''}" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
+      <button class="nav-link ${view === 'resources' ? 'active' : ''}" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
       <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
       <button class="nav-link ${view === 'settings' ? 'active' : ''}" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
     </nav>
 
     <div class="sidebar-spacer"></div>
-    <div class="sidebar-tip">
-      <span class="sidebar-tip-icon">✦</span>
-      <strong>One story. One shared decision.</strong>
-      <p>Everyone can vote on the same active story while the room stays focused.</p>
-    </div>
     <div class="sidebar-user">
       <span class="avatar">${escapeHTML(getInitials(getUserName()))}</span>
       <span class="sidebar-user-copy"><strong>${escapeHTML(getUserName())}</strong><span>${cloud.user ? 'Cloud participant' : 'Local facilitator'}</span></span>
@@ -657,7 +657,7 @@ function renderSettingsPage() {
   </section>
   <section class="settings-layout">
     <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Room identity</p><h2>Room details</h2></div></div><div class="settings-detail-list"><div><span>Name</span><strong>${escapeHTML(room.name)}</strong></div><div><span>Increment</span><strong>${escapeHTML(room.piLabel)}</strong></div><div><span>People with access</span><strong>${cloud.memberCount}</strong></div><div><span>Your role</span><strong>${room.role === 'owner' ? 'Room owner' : 'Team member'}</strong></div></div></section>
-    <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Estimation rules</p><h2>Point sequence</h2></div></div><p class="settings-copy">Everyone sees the same card values when a round starts. Existing estimates stay attached to their stories.</p><label class="sequence-control settings-sequence">Point sequence<select id="settings-sequence-select" aria-label="Point sequence">${Object.entries(sequences).map(([key, sequence]) => `<option value="${key}" ${key === state.sequence ? 'selected' : ''}>${sequence.label}</option>`).join('')}</select></label><div class="guide-points settings-points">${sequences[state.sequence].values.map((value) => `<span class="guide-point">${formatScore(value)}</span>`).join('')}</div></section>
+    <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Estimation rules</p><h2>Point sequence</h2></div></div><p class="settings-copy">Everyone sees the same card values when a round starts. Existing estimates stay attached to their stories.</p><label class="sequence-control settings-sequence">Point sequence<select id="settings-sequence-select" data-settings-sequence-select aria-label="Point sequence">${Object.entries(sequences).map(([key, sequence]) => `<option value="${key}" ${key === state.sequence ? 'selected' : ''}>${sequence.label}</option>`).join('')}</select></label><div class="guide-points settings-points">${sequences[state.sequence].values.map((value) => `<span class="guide-point">${formatScore(value)}</span>`).join('')}</div></section>
   </section>`;
 }
 
@@ -696,25 +696,17 @@ function render() {
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div>
       <p class="sidebar-kicker">Planning workspace</p>
-      <button class="room-selector" type="button" data-nav="rooms" aria-label="Open rooms">
-        <span class="room-dot"></span>
-        <span class="room-selector-copy"><strong>${escapeHTML(getRoomName())}</strong><span>${escapeHTML(getRoomPiLabel())} · ${cloud.status === 'local' ? 'Local room' : 'Shared room'}</span></span>
-        ${icon('chevronDown')}
-      </button>
+      ${renderRoomSelector()}
 
       <nav class="sidebar-nav" aria-label="Workspace navigation">
         <button class="nav-link active" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${state.stories.length}</span></button>
         <button class="nav-link" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
         <button class="nav-link" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
+        <button class="nav-link" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${cloud.rooms.length || 1}</span></button>
         <button class="nav-link" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
       </nav>
 
       <div class="sidebar-spacer"></div>
-      <div class="sidebar-tip">
-        <span class="sidebar-tip-icon">✦</span>
-        <strong>One story. One shared decision.</strong>
-        <p>Everyone can vote on the same active story while the room stays focused.</p>
-      </div>
       <div class="sidebar-user">
         <span class="avatar">${escapeHTML(getInitials(getUserName()))}</span>
         <span class="sidebar-user-copy"><strong>${escapeHTML(getUserName())}</strong><span>${cloud.user ? 'Cloud participant' : 'Local facilitator'}</span></span>
@@ -768,18 +760,14 @@ function render() {
           <section class="card estimator-card" aria-label="Story estimator">
             <div class="card-heading">
               <div><p class="story-progress">Story ${String(storyIndex + 1).padStart(2, '0')} of ${String(state.stories.length).padStart(2, '0')}</p><h2>Current story</h2></div>
-              <label class="sequence-control">Point sequence<select id="sequence-select" aria-label="Point sequence">${Object.entries(sequences).map(([key, sequence]) => `<option value="${key}" ${key === state.sequence ? 'selected' : ''}>${sequence.label}</option>`).join('')}</select></label>
             </div>
 
             <article class="story-detail">
-              <span class="story-type">${escapeHTML(selectedStory.type)}</span>
+              <div class="story-detail-top"><span class="story-type">${escapeHTML(selectedStory.type)}</span><button class="outline-button compact-button" type="button" data-edit-story="${escapeHTML(selectedStory.id)}">${icon('edit')}Edit story</button></div>
               <h3>${escapeHTML(selectedStory.title)}</h3>
               <p class="story-description">${escapeHTML(selectedStory.description)}</p>
               <div class="acceptance-list">${selectedStory.acceptance.map((item) => `<span class="acceptance-chip">${icon('check')}${escapeHTML(item)}</span>`).join('')}</div>
-              ${renderStoryServices(selectedStory)}
             </article>
-
-            ${renderVotePanel(selectedStory)}
 
             <section class="estimate-section">
               <div class="estimate-section-heading"><h3>Record the final perspectives</h3><p>${sequences[state.sequence].helper} · select or enter a custom value</p></div>
@@ -802,20 +790,17 @@ function render() {
           </aside>
         </div>
 
-        <div class="lower-grid">
+        <section class="card team-round-card" aria-label="Team round">
+          <div class="team-round-card-heading"><div><p class="section-kicker">Room-level activity</p><h2>Team round</h2><p>Run the shared vote for the current story. Point sequence and room defaults live in Room settings.</p></div><button class="outline-button compact-button" type="button" data-nav="settings">${icon('settings')}Room settings</button></div>
+          ${renderVotePanel(selectedStory)}
+        </section>
+
+        <div class="lower-grid lower-grid-single">
           <section class="card history-card">
             <div class="lower-card-heading"><h2>Estimate history</h2><span>Manual vs AI-assisted</span></div>
             <table class="history-table"><thead><tr><th>Story</th><th>Manual</th><th>AI</th><th>Difference</th></tr></thead><tbody>${renderHistoryRows()}</tbody></table>
           </section>
-          <section class="card guide-card">
-            <div class="lower-card-heading"><h2>${sequences[state.sequence].label} deck</h2><span>Room setting</span></div>
-            <p class="guide-copy">The point sequence applies to both fields. Keep the manual estimate as the team’s source of truth; the second field is a comparison only.</p>
-            <div class="guide-points">${sequences[state.sequence].values.map((value) => `<span class="guide-point">${formatScore(value)}</span>`).join('')}</div>
-            <div class="guide-note">${icon('info')} You can switch sequences at any time. Existing values stay attached to their stories.</div>
-          </section>
         </div>
-
-        ${renderAllocationCard()}
       </div>
     </main>
   `;
@@ -843,11 +828,20 @@ function renderEstimateField(type, story) {
 
 function renderStoryRow(story, index) {
   const status = story.manual !== null ? 'Estimated' : 'Needs estimate';
-  return `<button class="story-row ${story.id === state.selectedStoryId ? 'active' : ''}" type="button" data-story-id="${escapeHTML(story.id)}">
-    <span class="story-number">${String(index + 1).padStart(2, '0')}</span>
-    <span class="story-row-copy"><strong>${escapeHTML(story.title)}</strong><span>${escapeHTML(story.id)} · ${status}</span></span>
-    <span class="story-score"><span class="score-pill ${story.manual === null ? 'empty' : 'manual'}">${formatScore(story.manual)}</span><span class="score-pill ${story.ai === null ? 'empty' : 'ai'}">${formatScore(story.ai)}</span></span>
-  </button>`;
+  const canDelete = state.stories.length > 1;
+  return `<div class="story-row ${story.id === state.selectedStoryId ? 'active' : ''}">
+    <button class="story-row-main" type="button" data-story-id="${escapeHTML(story.id)}">
+      <span class="story-number">${String(index + 1).padStart(2, '0')}</span>
+      <span class="story-row-copy"><strong>${escapeHTML(story.title)}</strong><span>${escapeHTML(story.id)} · ${status}</span></span>
+      <span class="story-score"><span class="score-pill ${story.manual === null ? 'empty' : 'manual'}">${formatScore(story.manual)}</span><span class="score-pill ${story.ai === null ? 'empty' : 'ai'}">${formatScore(story.ai)}</span></span>
+    </button>
+    <span class="story-row-actions" aria-label="Actions for ${escapeHTML(story.title)}">
+      <button class="story-action-button" type="button" data-move-story="up" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} up" ${index === 0 ? 'disabled' : ''}>${icon('chevronUp')}</button>
+      <button class="story-action-button" type="button" data-move-story="down" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} down" ${index === state.stories.length - 1 ? 'disabled' : ''}>${icon('chevronDown')}</button>
+      <button class="story-action-button" type="button" data-edit-story="${escapeHTML(story.id)}" aria-label="Edit ${escapeHTML(story.title)}">${icon('edit')}</button>
+      <button class="story-action-button danger-action" type="button" data-delete-story="${escapeHTML(story.id)}" aria-label="Remove ${escapeHTML(story.title)}" ${canDelete ? '' : 'disabled'}>${icon('trash')}</button>
+    </span>
+  </div>`;
 }
 
 function renderHistoryRows() {
@@ -1034,15 +1028,17 @@ function bindEvents() {
     button.addEventListener('click', () => openInviteLink(button.dataset.inviteTeamToRoom, 'room-team'));
   });
 
-  document.querySelector('#sequence-select')?.addEventListener('change', (event) => {
-    state.sequence = event.target.value;
-    saveState();
-    render();
-    showToast(`${sequences[state.sequence].label} sequence applied to the room`);
-  });
-
   document.querySelectorAll('[data-story-id]').forEach((button) => {
     button.addEventListener('click', () => selectStory(button.dataset.storyId));
+  });
+  document.querySelectorAll('[data-edit-story]').forEach((button) => {
+    button.addEventListener('click', () => openStoryEditorModal(button.dataset.editStory));
+  });
+  document.querySelectorAll('[data-delete-story]').forEach((button) => {
+    button.addEventListener('click', () => deleteStory(button.dataset.deleteStory));
+  });
+  document.querySelectorAll('[data-move-story]').forEach((button) => {
+    button.addEventListener('click', () => moveStory(button.dataset.storyActionId, button.dataset.moveStory));
   });
 
   document.querySelectorAll('[data-estimate-type]').forEach((button) => {
@@ -1131,17 +1127,6 @@ function bindEvents() {
     saveState();
     syncSiteVote();
     render();
-  });
-
-  document.querySelector('[data-add-service]')?.addEventListener('change', (event) => addServiceToStory(event.target.value));
-  document.querySelectorAll('[data-story-service]').forEach((select) => {
-    select.addEventListener('change', () => updateStoryService(select.dataset.storyService, select.value));
-  });
-  document.querySelectorAll('[data-service-allocation]').forEach((input) => {
-    input.addEventListener('change', () => updateStoryServiceAllocation(input.dataset.serviceAllocation, input.value));
-  });
-  document.querySelectorAll('[data-remove-service]').forEach((button) => {
-    button.addEventListener('click', () => removeStoryService(button.dataset.removeService));
   });
 
   document.querySelectorAll('[data-breakdown]').forEach((button) => {
@@ -1427,6 +1412,34 @@ function selectStory(storyId) {
   if (state.round.storyId !== storyId) state.round = makeRound(storyId, state.round.mode, state.round.roundNumber + 1);
   saveState();
   render();
+}
+
+function moveStory(storyId, direction) {
+  const index = state.stories.findIndex((story) => story.id === storyId);
+  const nextIndex = direction === 'up' ? index - 1 : index + 1;
+  if (index < 0 || nextIndex < 0 || nextIndex >= state.stories.length) return;
+  [state.stories[index], state.stories[nextIndex]] = [state.stories[nextIndex], state.stories[index]];
+  saveState();
+  render();
+}
+
+function deleteStory(storyId) {
+  if (state.stories.length <= 1) {
+    showToast('Keep at least one story in the room');
+    return;
+  }
+  const index = state.stories.findIndex((story) => story.id === storyId);
+  if (index < 0) return;
+  const [removed] = state.stories.splice(index, 1);
+  if (state.selectedStoryId === storyId) {
+    state.selectedStoryId = state.stories[Math.min(index, state.stories.length - 1)].id;
+  }
+  if (state.round.storyId === storyId) {
+    state.round = makeRound(state.selectedStoryId, state.round.mode, state.round.roundNumber + 1);
+  }
+  saveState();
+  render();
+  showToast(`${removed.title} removed from the queue`);
 }
 
 function startVoting() {
@@ -1996,48 +2009,119 @@ function saveAndNext() {
 }
 
 function openNewStoryModal() {
-  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="new-story-title">
-    <div class="modal-header"><div><h2 id="new-story-title">Add a story</h2><p>Keep it lightweight. You can estimate the detail with the team.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('plus')}</button></div>
-    <form class="modal-form" data-new-story-form>
-      <div class="modal-field"><label for="new-story-name">Story title</label><input id="new-story-name" class="modal-input" name="title" required maxlength="120" placeholder="e.g. Add audit history to project changes" /></div>
-      <div class="modal-field"><label for="new-story-description">Short description <span style="color: var(--ink-soft); font-weight: 500;">(optional)</span></label><textarea id="new-story-description" class="modal-input" name="description" maxlength="280" placeholder="As a… I want… so that…"></textarea></div>
-      <div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Add story ${icon('plus')}</button></div>
-    </form>
-  </section></div>`;
+  openStoryEditorModal();
+}
 
-  const titleInput = document.querySelector('#new-story-name');
-  titleInput.focus();
+function openStoryEditorModal(storyId = null) {
+  const story = storyId ? state.stories.find((candidate) => candidate.id === storyId) : null;
+  if (storyId && !story) return;
+  storyEditorDraft = {
+    isNew: !story,
+    storyId: story?.id || null,
+    title: story?.title || '',
+    description: story?.description || '',
+    type: story?.type || 'Feature',
+    acceptance: story?.acceptance?.join('\n') || 'Ready for discussion',
+    serviceLinks: normalizeServiceLinks(story?.serviceLinks || []),
+  };
+  renderStoryEditorModal();
+}
+
+function renderStoryEditorServices() {
+  const links = normalizeServiceLinks(storyEditorDraft.serviceLinks);
+  const available = state.services.filter((service) => !links.some((link) => link.serviceId === service.id));
+  const rows = links.map((link) => {
+    const currentService = getService(link.serviceId);
+    const options = `${currentService ? '' : `<option value="${escapeHTML(link.serviceId)}" selected>Missing service</option>`}${state.services.map((service) => `<option value="${escapeHTML(service.id)}" ${service.id === link.serviceId ? 'selected' : ''}>${escapeHTML(service.name)}${getDomain(service.domainId) ? ` · ${escapeHTML(getDomain(service.domainId).name)}` : ''}</option>`).join('')}`;
+    return `<div class="editor-service-row"><select class="modal-input" data-editor-service-id="${escapeHTML(link.serviceId)}" aria-label="Story service">${options}</select><label class="allocation-input"><input type="number" min="0" max="100" step="5" value="${escapeHTML(link.allocation)}" data-editor-allocation="${escapeHTML(link.serviceId)}" aria-label="Allocation percentage" /><span>%</span></label><button class="icon-button compact-icon" type="button" data-editor-remove-service="${escapeHTML(link.serviceId)}" aria-label="Remove service link">${icon('x')}</button></div>`;
+  }).join('');
+  return `<div class="story-editor-services"><div class="modal-section-heading"><div><strong>Services</strong><span>Link the work to the teams delivering it.</span></div></div>${rows || '<p class="empty-manager">No services linked yet.</p>'}${available.length ? `<select class="modal-input editor-add-service" data-editor-add-service aria-label="Add service"><option value="">Add a service…</option>${available.map((service) => `<option value="${escapeHTML(service.id)}">${escapeHTML(service.name)}${getDomain(service.domainId) ? ` · ${escapeHTML(getDomain(service.domainId).name)}` : ''}</option>`).join('')}</select>` : state.services.length ? '<p class="modal-hint">All configured services are already linked.</p>' : '<p class="modal-hint">Add services from the Resources section first.</p>'}<p class="modal-hint">Use 100% across linked services. Any remainder stays unassigned.</p></div>`;
+}
+
+function renderStoryEditorModal() {
+  if (!storyEditorDraft) return;
+  const isNew = storyEditorDraft.isNew;
+  const types = ['Feature', 'Improvement', 'Tech debt'];
+  if (!types.includes(storyEditorDraft.type)) types.push(storyEditorDraft.type);
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal modal-wide story-editor-modal" role="dialog" aria-modal="true" aria-labelledby="story-editor-title"><div class="modal-header"><div><p class="section-kicker">${isNew ? 'Story queue' : 'Edit story'}</p><h2 id="story-editor-title">${isNew ? 'Add a story' : 'Edit story'}</h2><p>${isNew ? 'Capture the story and link it to the service that will deliver it.' : 'Update the story details and its service links before the next round.'}</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-story-editor-form><div class="story-editor-fields"><div class="modal-field"><label for="story-editor-title-input">Story title</label><input id="story-editor-title-input" class="modal-input" required maxlength="120" data-editor-field="title" value="${escapeHTML(storyEditorDraft.title)}" placeholder="e.g. Add audit history to project changes" /></div><div class="modal-field"><label for="story-editor-type">Type</label><select id="story-editor-type" class="modal-input" data-editor-field="type" aria-label="Story type">${types.map((type) => `<option value="${escapeHTML(type)}" ${type === storyEditorDraft.type ? 'selected' : ''}>${escapeHTML(type)}</option>`).join('')}</select></div></div><div class="modal-field"><label for="story-editor-description">Description <span class="field-optional">(optional)</span></label><textarea id="story-editor-description" class="modal-input" maxlength="280" data-editor-field="description" placeholder="As a… I want… so that…">${escapeHTML(storyEditorDraft.description)}</textarea></div><div class="modal-field"><label for="story-editor-acceptance">Acceptance criteria <span class="field-optional">(one per line)</span></label><textarea id="story-editor-acceptance" class="modal-input acceptance-editor" maxlength="500" data-editor-field="acceptance" placeholder="Ready for discussion">${escapeHTML(storyEditorDraft.acceptance)}</textarea></div>${renderStoryEditorServices()}<div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">${isNew ? 'Add story' : 'Save changes'} ${icon(isNew ? 'plus' : 'check')}</button></div></form></section></div>`;
+
+  const form = document.querySelector('[data-story-editor-form]');
   document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
   document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
     if (event.target === event.currentTarget) closeModal();
   });
-  document.querySelector('[data-new-story-form]').addEventListener('submit', (event) => {
+  form.addEventListener('input', (event) => {
+    const field = event.target.dataset.editorField;
+    if (field) storyEditorDraft[field] = event.target.value;
+  });
+  form.addEventListener('change', (event) => {
+    const field = event.target.dataset.editorField;
+    if (field) storyEditorDraft[field] = event.target.value;
+    if (event.target.dataset.editorAddService !== undefined) {
+      const serviceId = event.target.value;
+      if (!serviceId) return;
+      const links = normalizeServiceLinks(storyEditorDraft.serviceLinks);
+      if (!links.some((link) => link.serviceId === serviceId)) {
+        const remaining = Math.max(0, 100 - links.reduce((sum, link) => sum + link.allocation, 0));
+        storyEditorDraft.serviceLinks = [...links, { serviceId, allocation: remaining }];
+      }
+      renderStoryEditorModal();
+      return;
+    }
+    if (event.target.dataset.editorServiceId !== undefined) {
+      const previousServiceId = event.target.dataset.editorServiceId;
+      const serviceId = event.target.value;
+      const links = normalizeServiceLinks(storyEditorDraft.serviceLinks);
+      if (!serviceId || links.some((link) => link.serviceId === serviceId && link.serviceId !== previousServiceId)) {
+        renderStoryEditorModal();
+        return;
+      }
+      storyEditorDraft.serviceLinks = links.map((link) => link.serviceId === previousServiceId ? { ...link, serviceId } : link);
+      renderStoryEditorModal();
+      return;
+    }
+    if (event.target.dataset.editorAllocation !== undefined) {
+      const serviceId = event.target.dataset.editorAllocation;
+      const links = normalizeServiceLinks(storyEditorDraft.serviceLinks);
+      const next = Math.min(100, Math.max(0, Number(event.target.value) || 0));
+      const otherTotal = links.filter((link) => link.serviceId !== serviceId).reduce((sum, link) => sum + link.allocation, 0);
+      storyEditorDraft.serviceLinks = links.map((link) => link.serviceId === serviceId ? { ...link, allocation: Math.min(next, Math.max(0, 100 - otherTotal)) } : link);
+      renderStoryEditorModal();
+    }
+  });
+  document.querySelectorAll('[data-editor-remove-service]').forEach((button) => {
+    button.addEventListener('click', () => {
+      storyEditorDraft.serviceLinks = normalizeServiceLinks(storyEditorDraft.serviceLinks).filter((link) => link.serviceId !== button.dataset.editorRemoveService);
+      renderStoryEditorModal();
+    });
+  });
+  form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const form = new FormData(event.target);
-    const title = String(form.get('title') || '').trim();
-    const description = String(form.get('description') || '').trim();
+    const title = storyEditorDraft.title.trim();
     if (!title) return;
-
-    const storyNumber = 104 + state.stories.length;
-    const story = {
-      id: `PL-${storyNumber}`,
-      type: 'Feature',
-      title,
-      description: description || 'A new story ready for the team to shape and estimate together.',
-      acceptance: ['Ready for discussion'],
-    manual: null,
-    ai: null,
-    aiEnabled: false,
-    saved: false,
-    serviceLinks: [],
-  };
-    state.stories.push(story);
-    state.selectedStoryId = story.id;
+    const acceptance = storyEditorDraft.acceptance.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    if (storyEditorDraft.isNew) {
+      let storyNumber = 104 + state.stories.length;
+      while (state.stories.some((story) => story.id === `PL-${storyNumber}`)) storyNumber += 1;
+      const story = { id: `PL-${storyNumber}`, type: storyEditorDraft.type, title, description: storyEditorDraft.description.trim() || 'A new story ready for the team to shape and estimate together.', acceptance: acceptance.length ? acceptance : ['Ready for discussion'], manual: null, ai: null, aiEnabled: false, saved: false, serviceLinks: normalizeServiceLinks(storyEditorDraft.serviceLinks) };
+      state.stories.push(story);
+      state.selectedStoryId = story.id;
+      showToast(`${story.id} added to the queue`);
+    } else {
+      const story = state.stories.find((candidate) => candidate.id === storyEditorDraft.storyId);
+      if (!story) return;
+      story.type = storyEditorDraft.type;
+      story.title = title;
+      story.description = storyEditorDraft.description.trim() || 'A new story ready for the team to shape and estimate together.';
+      story.acceptance = acceptance.length ? acceptance : ['Ready for discussion'];
+      story.serviceLinks = normalizeServiceLinks(storyEditorDraft.serviceLinks);
+      showToast(`${story.id} updated`);
+    }
     saveState();
     closeModal();
     render();
-    showToast(`${story.id} added to the queue`);
   });
+  document.querySelector('#story-editor-title-input').focus();
 }
 
 function openImportModal() {
@@ -2110,6 +2194,7 @@ function setImportMode(mode) {
 }
 
 function closeModal() {
+  storyEditorDraft = null;
   document.querySelector('#modal-root').innerHTML = '';
 }
 
