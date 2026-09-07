@@ -1233,10 +1233,21 @@ h1 {
   font-size: 10px;
 }
 
+.history-card-note {
+  margin: -8px 0 16px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .history-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 11px;
+}
+
+.vote-history-table {
+  min-width: 560px;
 }
 
 .history-table th {
@@ -1884,6 +1895,12 @@ h1 {
 .vote-result-list {
   display: grid;
   gap: 6px;
+  margin-top: 11px;
+}
+
+.vote-result-actions {
+  display: flex;
+  justify-content: flex-end;
   margin-top: 11px;
 }
 
