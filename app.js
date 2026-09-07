@@ -1,6 +1,8 @@
 const STORAGE_KEY = 'pointline-pi-room-v1';
 const PARTICIPANT_ID_KEY = 'pointline-participant-id-v1';
 const ROOM_ID_KEY = 'pointline-room-id-v1';
+const WORKSPACE_KEY = 'pointline-workspace-v1';
+const LOCAL_DEFAULT_ROOM_ID = 'local-commerce';
 
 const sequences = {
   sequential: {
@@ -144,12 +146,62 @@ const defaultState = {
   },
 };
 
-let state = loadState();
+const defaultWorkspace = {
+  rooms: [{ id: LOCAL_DEFAULT_ROOM_ID, name: 'Commerce platform', piLabel: 'PI 24', memberCount: 1, role: 'owner' }],
+  teams: [{
+    id: 'local-team-commerce',
+    name: 'Commerce planning',
+    role: 'owner',
+    members: [{ id: 'local-planner', name: 'Jordan L.', email: '', role: 'owner' }],
+  }],
+};
+
+function loadLocalWorkspace() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WORKSPACE_KEY));
+    if (!saved || !Array.isArray(saved.rooms) || !Array.isArray(saved.teams)) return structuredClone(defaultWorkspace);
+    return {
+      rooms: saved.rooms.map((room) => ({
+        id: String(room.id || '').trim(),
+        name: String(room.name || 'Untitled room').trim() || 'Untitled room',
+        piLabel: String(room.piLabel || 'New PI').trim() || 'New PI',
+        memberCount: Math.max(1, Number(room.memberCount) || 1),
+        role: room.role === 'member' ? 'member' : 'owner',
+      })).filter((room) => room.id),
+      teams: saved.teams.map((team) => ({
+        id: String(team.id || '').trim(),
+        name: String(team.name || 'Untitled team').trim() || 'Untitled team',
+        role: team.role === 'member' ? 'member' : 'owner',
+        members: Array.isArray(team.members) ? team.members.map((member) => ({
+          id: String(member.id || '').trim(),
+          name: String(member.name || 'Planner').trim() || 'Planner',
+          email: String(member.email || '').trim(),
+          role: member.role === 'member' ? 'member' : 'owner',
+        })).filter((member) => member.id) : [],
+      })).filter((team) => team.id),
+    };
+  } catch {
+    return structuredClone(defaultWorkspace);
+  }
+}
+
+function saveLocalWorkspace() {
+  localStorage.setItem(WORKSPACE_KEY, JSON.stringify(localWorkspace));
+}
+
+const localWorkspace = loadLocalWorkspace();
+let activeRoomId = getConfiguredRoomId() || localWorkspace.rooms[0]?.id || LOCAL_DEFAULT_ROOM_ID;
+let activeView = getViewFromLocation();
+let state = loadState(activeRoomId);
 let toastTimer;
 let importDraft = { mode: 'text', text: '', fileName: '' };
 let cloud = {
   user: null,
-  roomId: null,
+  roomId: activeRoomId,
+  room: localWorkspace.rooms.find((room) => room.id === activeRoomId) || localWorkspace.rooms[0] || defaultWorkspace.rooms[0],
+  rooms: localWorkspace.rooms,
+  teams: localWorkspace.teams,
+  selectedTeamId: localWorkspace.teams[0]?.id || null,
   status: 'local',
   memberCount: 1,
 };
@@ -224,9 +276,10 @@ function normalizeRound(round, storyId) {
   };
 }
 
-function loadState() {
+function loadState(roomId = LOCAL_DEFAULT_ROOM_ID) {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const storageKey = roomId === LOCAL_DEFAULT_ROOM_ID ? STORAGE_KEY : `${STORAGE_KEY}-${roomId}`;
+    const saved = JSON.parse(localStorage.getItem(storageKey));
     if (!saved || !Array.isArray(saved.stories)) return structuredClone(defaultState);
 
     const selectedStoryId = saved.selectedStoryId && saved.stories.some((story) => story.id === saved.selectedStoryId)
@@ -272,7 +325,8 @@ function saveState() {
 }
 
 function persistLocalState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const storageKey = activeRoomId === LOCAL_DEFAULT_ROOM_ID ? STORAGE_KEY : `${STORAGE_KEY}-${activeRoomId}`;
+  localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
 function escapeHTML(value) {
@@ -293,6 +347,7 @@ function icon(name, className = '') {
     chevron: '<path d="m9 18 6-6-6-6"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',
     share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.2-1.2"/>',
     bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     sparkle: '<path d="m12 3-1.5 5.5L5 10l5.5 1.5L12 17l1.5-5.5L19 10l-5.5-1.5L12 3ZM19 16l-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7L19 16Z"/>',
@@ -326,6 +381,23 @@ function getConfiguredRoomId() {
   const urlRoomId = new URLSearchParams(window.location.search).get('room');
   const candidate = urlRoomId || localStorage.getItem(ROOM_ID_KEY) || '';
   return /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(candidate) ? candidate : null;
+}
+
+function getViewFromLocation() {
+  const view = window.location.hash.replace(/^#/, '').trim().toLowerCase();
+  return ['estimates', 'rooms', 'team', 'resources', 'settings'].includes(view) ? view : 'estimates';
+}
+
+function getCurrentRoom() {
+  return cloud.room || cloud.rooms.find((room) => room.id === cloud.roomId) || localWorkspace.rooms.find((room) => room.id === cloud.roomId) || defaultWorkspace.rooms[0];
+}
+
+function getRoomName() {
+  return getCurrentRoom()?.name || 'Planning room';
+}
+
+function getRoomPiLabel() {
+  return getCurrentRoom()?.piLabel || 'Current increment';
 }
 
 function getUserName(user = cloud.user) {
@@ -492,7 +564,107 @@ function renderAllocationCard() {
   return `<section class="card allocation-card" id="allocation-card"><div class="lower-card-heading"><div><h2>Resource allocation</h2><p>Manual story points mapped to the services doing the work.</p></div><button class="outline-button" type="button" data-manage-services>${icon('layers')}Manage services</button></div><div class="allocation-tabs" role="tablist" aria-label="Allocation breakdown"><button class="allocation-tab active" type="button" data-breakdown="service" role="tab" aria-selected="true">By service</button><button class="allocation-tab" type="button" data-breakdown="domain" role="tab" aria-selected="false">By domain</button></div><div class="allocation-breakdown" data-breakdown-panel="service">${renderBreakdownRows('service')}</div><div class="allocation-breakdown" data-breakdown-panel="domain" hidden>${renderBreakdownRows('domain')}</div><p class="allocation-note">Only saved manual estimates count. Unestimated work is excluded until it has a team value; incomplete service links leave the remainder Unassigned.</p></section>`;
 }
 
+function renderSidebar(view = activeView) {
+  const room = getCurrentRoom();
+  const roomCount = cloud.rooms.length || 1;
+  return `<aside class="sidebar">
+    <div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div>
+    <p class="sidebar-kicker">Planning workspace</p>
+    <button class="room-selector" type="button" data-nav="rooms" aria-label="Open rooms">
+      <span class="room-dot"></span>
+      <span class="room-selector-copy"><strong>${escapeHTML(room.name)}</strong><span>${escapeHTML(room.piLabel)} · ${cloud.status === 'local' ? 'Local room' : 'Shared room'}</span></span>
+      ${icon('chevronDown')}
+    </button>
+
+    <nav class="sidebar-nav" aria-label="Workspace navigation">
+      <button class="nav-link ${view === 'estimates' ? 'active' : ''}" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${state.stories.filter((story) => story.manual !== null).length}/${state.stories.length}</span></button>
+      <button class="nav-link ${view === 'team' ? 'active' : ''}" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
+      <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
+      <button class="nav-link ${view === 'settings' ? 'active' : ''}" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
+    </nav>
+
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-tip">
+      <span class="sidebar-tip-icon">✦</span>
+      <strong>One story. One shared decision.</strong>
+      <p>Everyone can vote on the same active story while the room stays focused.</p>
+    </div>
+    <div class="sidebar-user">
+      <span class="avatar">${escapeHTML(getInitials(getUserName()))}</span>
+      <span class="sidebar-user-copy"><strong>${escapeHTML(getUserName())}</strong><span>${cloud.user ? 'Cloud participant' : 'Local facilitator'}</span></span>
+    </div>
+  </aside>`;
+}
+
+function renderTopbar(view = activeView) {
+  const labels = { estimates: 'Estimates', team: 'Team', rooms: 'Rooms', resources: 'Resources', settings: 'Room settings' };
+  return `<header class="topbar">
+    <div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<span>${escapeHTML(getRoomName())}</span>${icon('chevron')}<span>${labels[view]}</span></div>
+    <div class="topbar-actions">
+      <button class="icon-button" type="button" data-notifications aria-label="Notifications">${icon('bell')}</button>
+      <button class="outline-button" type="button" data-share>${icon('share')}Invite</button>
+      ${renderAuthAction()}
+    </div>
+  </header>`;
+}
+
+function renderRoomsPage() {
+  return `<section class="page-intro">
+    <div><p class="eyebrow">Workspace · rooms</p><h1>Choose where the planning happens.</h1><p class="page-intro-copy">Keep each increment focused. Create a room for a planning session, then invite the people or team who should estimate together.</p></div>
+    <button class="primary-button" type="button" data-create-room>${icon('plus')}New room</button>
+  </section>
+  <section class="management-section">
+    <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
+    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : 'Member'}</span><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
+  </section>`;
+}
+
+function getSelectedTeam() {
+  return cloud.teams.find((team) => team.id === cloud.selectedTeamId) || cloud.teams[0] || null;
+}
+
+function renderTeamPage() {
+  const selectedTeam = getSelectedTeam();
+  return `<section class="page-intro">
+    <div><p class="eyebrow">Workspace · team</p><h1>Build your planning teams.</h1><p class="page-intro-copy">Keep people reusable across rooms. Add teammates once, then invite the whole team into the room that needs them.</p></div>
+    <button class="primary-button" type="button" data-create-team>${icon('plus')}New team</button>
+  </section>
+  <div class="team-layout">
+    <section class="card team-directory-card"><div class="section-heading"><div><p class="section-kicker">Teams</p><h2>Your teams</h2></div><span class="section-count">${cloud.teams.length}</span></div><div class="team-list">${cloud.teams.length ? cloud.teams.map((team) => `<button class="team-list-row ${team.id === selectedTeam?.id ? 'active' : ''}" type="button" data-select-team="${escapeHTML(team.id)}"><span class="team-avatar">${escapeHTML(getInitials(team.name))}</span><span><strong>${escapeHTML(team.name)}</strong><small>${team.members?.length || team.memberCount || 0} ${(team.members?.length || team.memberCount || 0) === 1 ? 'person' : 'people'}</small></span>${icon('chevron')}</button>`).join('') : '<div class="empty-state compact"><h3>No teams yet</h3><p>Create one to reuse a group of people across rooms.</p></div>'}</div></section>
+    <section class="card team-detail-card">${selectedTeam ? `<div class="team-detail-header"><div><p class="section-kicker">Team roster</p><h2>${escapeHTML(selectedTeam.name)}</h2><p>Invite this team to <strong>${escapeHTML(getRoomName())}</strong> or share a link for people to join the team.</p></div><span class="team-detail-badge">${selectedTeam.role === 'owner' ? 'Owner' : 'Member'}</span></div><div class="team-actions"><button class="primary-button" type="button" data-invite-team-to-room="${escapeHTML(selectedTeam.id)}">${icon('share')}Invite team to room</button><button class="outline-button" type="button" data-invite-team="${escapeHTML(selectedTeam.id)}">${icon('link')}Add people with a link</button></div><div class="member-list"><div class="member-list-heading"><strong>People</strong><span>${selectedTeam.members?.length || selectedTeam.memberCount || 0} members</span></div>${(selectedTeam.members || []).map((member) => `<div class="member-row"><span class="avatar small-avatar">${escapeHTML(getInitials(member.name))}</span><span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.email || (member.role === 'owner' ? 'Team owner' : 'Team member'))}</small></span><span class="member-role">${member.role === 'owner' ? 'Owner' : 'Member'}</span></div>`).join('') || '<p class="empty-manager">No members yet. Share the team link to add the first person.</p>'}</div>` : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>Create your first team</h3><p>Teams make it easy to invite the same people into several planning rooms.</p></div>'}</section>
+  </div>`;
+}
+
+function renderSettingsPage() {
+  const room = getCurrentRoom();
+  return `<section class="page-intro">
+    <div><p class="eyebrow">Workspace · room settings</p><h1>${escapeHTML(room.name)}</h1><p class="page-intro-copy">Tune the room vocabulary and share access without leaving the planning workspace.</p></div>
+    <button class="outline-button" type="button" data-share>${icon('share')}Invite people</button>
+  </section>
+  <section class="settings-layout">
+    <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Room identity</p><h2>Room details</h2></div></div><div class="settings-detail-list"><div><span>Name</span><strong>${escapeHTML(room.name)}</strong></div><div><span>Increment</span><strong>${escapeHTML(room.piLabel)}</strong></div><div><span>People with access</span><strong>${cloud.memberCount}</strong></div><div><span>Your role</span><strong>${room.role === 'owner' ? 'Room owner' : 'Team member'}</strong></div></div></section>
+    <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Estimation rules</p><h2>Point sequence</h2></div></div><p class="settings-copy">Everyone sees the same card values when a round starts. Existing estimates stay attached to their stories.</p><label class="sequence-control settings-sequence">Point sequence<select id="settings-sequence-select" aria-label="Point sequence">${Object.entries(sequences).map(([key, sequence]) => `<option value="${key}" ${key === state.sequence ? 'selected' : ''}>${sequence.label}</option>`).join('')}</select></label><div class="guide-points settings-points">${sequences[state.sequence].values.map((value) => `<span class="guide-point">${formatScore(value)}</span>`).join('')}</div></section>
+  </section>`;
+}
+
+function renderManagementPage() {
+  const content = activeView === 'rooms'
+    ? renderRoomsPage()
+    : activeView === 'team'
+      ? renderTeamPage()
+      : activeView === 'resources'
+        ? `<section class="page-intro"><div><p class="eyebrow">Workspace · resources</p><h1>See where the work lands.</h1><p class="page-intro-copy">Use the same saved story estimates to understand service and domain allocation.</p></div></section>${renderAllocationCard()}`
+        : renderSettingsPage();
+
+  document.querySelector('#app').innerHTML = `${renderSidebar(activeView)}<main class="main-area">${renderTopbar(activeView)}<div class="main-content management-content">${content}</div></main>`;
+  bindEvents();
+}
+
 function render() {
+  if (activeView !== 'estimates') {
+    renderManagementPage();
+    return;
+  }
   const selectedStory = getSelectedStory();
   const estimatedCount = state.stories.filter((story) => story.manual !== null).length;
   const aiCount = state.stories.filter((story) => story.ai !== null).length;
@@ -509,25 +681,25 @@ function render() {
   document.querySelector('#app').innerHTML = `
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div>
-      <p class="sidebar-kicker">Planning room</p>
-      <button class="room-selector" type="button" data-room-info aria-label="Current planning room">
+      <p class="sidebar-kicker">Planning workspace</p>
+      <button class="room-selector" type="button" data-nav="rooms" aria-label="Open rooms">
         <span class="room-dot"></span>
-        <span class="room-selector-copy"><strong>Commerce platform</strong><span>PI 24 · Private room</span></span>
+        <span class="room-selector-copy"><strong>${escapeHTML(getRoomName())}</strong><span>${escapeHTML(getRoomPiLabel())} · ${cloud.status === 'local' ? 'Local room' : 'Shared room'}</span></span>
         ${icon('chevronDown')}
       </button>
 
-      <nav class="sidebar-nav" aria-label="Room navigation">
-        <button class="nav-link active" type="button">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${state.stories.length}</span></button>
-        <button class="nav-link" type="button" data-team-info>${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
-        <button class="nav-link" type="button" data-scroll-allocation>${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
-        <button class="nav-link" type="button" data-settings-info>${icon('settings')}<span class="nav-link-label">Room settings</span></button>
+      <nav class="sidebar-nav" aria-label="Workspace navigation">
+        <button class="nav-link active" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${state.stories.length}</span></button>
+        <button class="nav-link" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
+        <button class="nav-link" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
+        <button class="nav-link" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
       </nav>
 
       <div class="sidebar-spacer"></div>
       <div class="sidebar-tip">
         <span class="sidebar-tip-icon">✦</span>
-        <strong>Second opinions stay optional.</strong>
-        <p>Use the AI field when it helps, and keep the team’s estimate in the driver’s seat.</p>
+        <strong>One story. One shared decision.</strong>
+        <p>Everyone can vote on the same active story while the room stays focused.</p>
       </div>
       <div class="sidebar-user">
         <span class="avatar">${escapeHTML(getInitials(getUserName()))}</span>
@@ -537,10 +709,10 @@ function render() {
 
     <main class="main-area">
       <header class="topbar">
-        <div class="breadcrumbs"><span>Rooms</span>${icon('chevron')}<span>Commerce platform</span>${icon('chevron')}<span>Estimates</span></div>
+        <div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<span>${escapeHTML(getRoomName())}</span>${icon('chevron')}<span>Estimates</span></div>
         <div class="topbar-actions">
           <button class="icon-button" type="button" data-notifications aria-label="Notifications">${icon('bell')}</button>
-          <button class="outline-button" type="button" data-share>${icon('share')}Share room</button>
+          <button class="outline-button" type="button" data-share>${icon('share')}Invite</button>
           ${renderAuthAction()}
         </div>
       </header>
@@ -552,7 +724,7 @@ function render() {
             <h1>Estimate the work,<br />then compare the lens.</h1>
             <p class="hero-copy">Give every story a team-owned estimate, map the work to the services delivering it, and compare an optional AI-assisted second opinion without anchoring the room.</p>
           </div>
-          <div class="pi-meta"><span class="pi-meta-icon">PI</span><span class="pi-meta-copy"><span>Current increment</span><strong>PI 24 · Commerce platform</strong><small class="cloud-status">${renderCloudStatus()}</small></span></div>
+          <div class="pi-meta"><span class="pi-meta-icon">PI</span><span class="pi-meta-copy"><span>Current increment</span><strong>${escapeHTML(getRoomPiLabel())} · ${escapeHTML(getRoomName())}</strong><small class="cloud-status">${renderCloudStatus()}</small></span></div>
         </section>
 
         <section class="summary-grid" aria-label="Room summary">
@@ -826,6 +998,28 @@ function addImportedStories(stories) {
 }
 
 function bindEvents() {
+  document.querySelectorAll('[data-nav]').forEach((button) => {
+    button.addEventListener('click', () => navigateToView(button.dataset.nav));
+  });
+
+  document.querySelectorAll('[data-open-room]').forEach((button) => {
+    button.addEventListener('click', () => selectRoom(button.dataset.openRoom));
+  });
+  document.querySelector('[data-create-room]')?.addEventListener('click', openCreateRoomModal);
+  document.querySelector('[data-create-team]')?.addEventListener('click', openCreateTeamModal);
+  document.querySelectorAll('[data-select-team]').forEach((button) => {
+    button.addEventListener('click', () => {
+      cloud.selectedTeamId = button.dataset.selectTeam;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-invite-team]').forEach((button) => {
+    button.addEventListener('click', () => openInviteLink(button.dataset.inviteTeam, 'team'));
+  });
+  document.querySelectorAll('[data-invite-team-to-room]').forEach((button) => {
+    button.addEventListener('click', () => openInviteLink(button.dataset.inviteTeamToRoom, 'room-team'));
+  });
+
   document.querySelector('#sequence-select')?.addEventListener('change', (event) => {
     state.sequence = event.target.value;
     saveState();
@@ -885,11 +1079,13 @@ function bindEvents() {
   document.querySelector('[data-new-story]')?.addEventListener('click', openNewStoryModal);
   document.querySelector('[data-import-stories]')?.addEventListener('click', openImportModal);
   document.querySelector('[data-share]')?.addEventListener('click', shareRoom);
+  document.querySelector('[data-settings-sequence-select]')?.addEventListener('change', (event) => {
+    state.sequence = event.target.value;
+    saveState();
+    render();
+    showToast(`${sequences[state.sequence].label} sequence applied to the room`);
+  });
   document.querySelector('[data-notifications]')?.addEventListener('click', () => showToast('You’re all caught up'));
-  document.querySelector('[data-room-info]')?.addEventListener('click', () => showToast('Commerce platform · PI 24 is the active room'));
-  document.querySelector('[data-team-info]')?.addEventListener('click', () => showToast(`${cloud.memberCount} teammates have access to this room`));
-  document.querySelector('[data-settings-info]')?.addEventListener('click', () => showToast('Use the point sequence control on the current story card'));
-  document.querySelector('[data-scroll-allocation]')?.addEventListener('click', () => document.querySelector('#allocation-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   document.querySelectorAll('[data-manage-services]').forEach((button) => button.addEventListener('click', openServicesModal));
 
   document.querySelectorAll('[data-vote-mode]').forEach((button) => {
@@ -946,6 +1142,263 @@ function bindEvents() {
       signInWithChatGPT();
     }
   });
+}
+
+function makeEmptyRoomState() {
+  const empty = structuredClone(defaultState);
+  empty.selectedStoryId = 'ST-001';
+  empty.stories = [{
+    id: 'ST-001',
+    type: 'Feature',
+    title: 'First story to estimate',
+    description: 'Add a story, then let the team estimate it together.',
+    acceptance: ['Ready for discussion'],
+    manual: null,
+    ai: null,
+    aiEnabled: false,
+    saved: false,
+    serviceLinks: [],
+  }];
+  empty.domains = [];
+  empty.services = [];
+  empty.round = makeRound(empty.selectedStoryId);
+  return empty;
+}
+
+function roomStatePayload(roomState = makeEmptyRoomState()) {
+  return JSON.parse(JSON.stringify(roomState));
+}
+
+function normalizeRoomRecord(room) {
+  return {
+    id: String(room?.id || '').trim(),
+    name: String(room?.name || 'Untitled room').trim() || 'Untitled room',
+    piLabel: String(room?.piLabel || 'New PI').trim() || 'New PI',
+    memberCount: Math.max(1, Number(room?.memberCount) || 1),
+    role: room?.role === 'member' ? 'member' : 'owner',
+  };
+}
+
+function normalizeTeamRecord(team) {
+  return {
+    id: String(team?.id || '').trim(),
+    name: String(team?.name || 'Untitled team').trim() || 'Untitled team',
+    role: team?.role === 'member' ? 'member' : 'owner',
+    memberCount: Math.max(0, Number(team?.memberCount) || team?.members?.length || 0),
+    members: Array.isArray(team?.members) ? team.members.map((member) => ({
+      id: String(member?.id || '').trim(),
+      name: String(member?.name || 'Planner').trim() || 'Planner',
+      email: String(member?.email || '').trim(),
+      role: member?.role === 'owner' ? 'owner' : 'member',
+    })).filter((member) => member.id) : [],
+  };
+}
+
+async function refreshWorkspaceData() {
+  if (!siteRuntime.ready) return;
+  try {
+    const [roomsPayload, teamsPayload] = await Promise.all([
+      siteRequest('/api/rooms'),
+      siteRequest('/api/teams'),
+    ]);
+    cloud.rooms = Array.isArray(roomsPayload.rooms) ? roomsPayload.rooms.map(normalizeRoomRecord) : [];
+    cloud.teams = Array.isArray(teamsPayload.teams) ? teamsPayload.teams.map(normalizeTeamRecord) : [];
+    cloud.selectedTeamId = cloud.teams.some((team) => team.id === cloud.selectedTeamId) ? cloud.selectedTeamId : cloud.teams[0]?.id || null;
+    render();
+  } catch (error) {
+    console.warn('Pointline workspace refresh failed', error);
+  }
+}
+
+async function selectRoom(roomId) {
+  const room = cloud.rooms.find((candidate) => candidate.id === roomId);
+  if (!room) return;
+  persistLocalState();
+
+  if (siteRuntime.ready) {
+    try {
+      const payload = await siteRequest(`/api/state?room=${encodeURIComponent(roomId)}`);
+      if (!applySiteState(payload.state)) throw new Error('This room has no stories yet');
+      activeRoomId = roomId;
+      cloud.roomId = roomId;
+      cloud.room = normalizeRoomRecord(payload.room || room);
+      cloud.memberCount = Math.max(1, Number(payload.memberCount) || room.memberCount);
+      updateRoomUrl(roomId);
+      activeView = 'estimates';
+      render();
+      showToast(`${room.name} is ready`);
+    } catch (error) {
+      showToast(error.message || 'This room is not available');
+    }
+    return;
+  }
+
+  activeRoomId = roomId;
+  cloud.roomId = roomId;
+  cloud.room = room;
+  cloud.memberCount = room.memberCount;
+  state = loadState(roomId);
+  localStorage.setItem(ROOM_ID_KEY, roomId);
+  updateRoomUrl(roomId);
+  activeView = 'estimates';
+  render();
+  showToast(`${room.name} is ready`);
+}
+
+async function createRoomRecord(name, piLabel) {
+  if (siteRuntime.ready) {
+    const payload = await siteRequest('/api/rooms', {
+      method: 'POST',
+      body: JSON.stringify({ name, piLabel, state: roomStatePayload(makeEmptyRoomState()) }),
+    });
+    const room = normalizeRoomRecord(payload.room);
+    cloud.rooms = [...cloud.rooms.filter((candidate) => candidate.id !== room.id), room];
+    cloud.roomId = room.id;
+    cloud.room = room;
+    cloud.memberCount = room.memberCount;
+    activeRoomId = room.id;
+    applySiteState(payload.state);
+    updateRoomUrl(room.id);
+    activeView = 'estimates';
+    render();
+    showToast(`${name} created`);
+    return;
+  }
+
+  const id = `room-${Date.now().toString(36)}`;
+  const room = { id, name, piLabel, memberCount: 1, role: 'owner' };
+  localWorkspace.rooms.push(room);
+  saveLocalWorkspace();
+  localStorage.setItem(`${STORAGE_KEY}-${id}`, JSON.stringify(makeEmptyRoomState()));
+  cloud.rooms = localWorkspace.rooms;
+  await selectRoom(id);
+  showToast(`${name} created`);
+}
+
+function openCreateRoomModal() {
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="create-room-title"><div class="modal-header"><div><p class="section-kicker">New planning space</p><h2 id="create-room-title">Create a room</h2><p>Start with a focused story queue and invite the people who should estimate it.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-create-room-form><div class="modal-field"><label for="room-name">Room name</label><input id="room-name" class="modal-input" name="name" required maxlength="80" placeholder="e.g. Payments PI planning" /></div><div class="modal-field"><label for="room-pi">Increment label</label><input id="room-pi" class="modal-input" name="piLabel" required maxlength="40" placeholder="e.g. PI 25" /></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Create room ${icon('plus')}</button></div></form></section></div>`;
+  document.querySelector('#room-name').focus();
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-create-room-form]').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const name = String(form.get('name') || '').trim();
+    const piLabel = String(form.get('piLabel') || '').trim();
+    if (!name || !piLabel) return;
+    const submit = event.target.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      await createRoomRecord(name, piLabel);
+      closeModal();
+    } catch (error) {
+      submit.disabled = false;
+      showToast(error.message || 'Room could not be created');
+    }
+  });
+}
+
+async function createTeamRecord(name) {
+  if (siteRuntime.ready) {
+    const payload = await siteRequest('/api/teams', { method: 'POST', body: JSON.stringify({ name }) });
+    const team = normalizeTeamRecord(payload.team);
+    cloud.teams = [...cloud.teams.filter((candidate) => candidate.id !== team.id), team];
+    cloud.selectedTeamId = team.id;
+    render();
+    showToast(`${name} created`);
+    return;
+  }
+
+  const member = { id: participantId, name: getUserName(), email: '', role: 'owner' };
+  const team = { id: `team-${Date.now().toString(36)}`, name, role: 'owner', members: [member], memberCount: 1 };
+  localWorkspace.teams.push(team);
+  saveLocalWorkspace();
+  cloud.teams = localWorkspace.teams;
+  cloud.selectedTeamId = team.id;
+  render();
+  showToast(`${name} created`);
+}
+
+function openCreateTeamModal() {
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="create-team-title"><div class="modal-header"><div><p class="section-kicker">Reusable group</p><h2 id="create-team-title">Create a team</h2><p>Give the group a name, then share its link to add people.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-create-team-form><div class="modal-field"><label for="team-name">Team name</label><input id="team-name" class="modal-input" name="name" required maxlength="80" placeholder="e.g. Commerce squad" /></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Create team ${icon('plus')}</button></div></form></section></div>`;
+  document.querySelector('#team-name').focus();
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-create-team-form]').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = String(new FormData(event.target).get('name') || '').trim();
+    if (!name) return;
+    const submit = event.target.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      await createTeamRecord(name);
+      closeModal();
+    } catch (error) {
+      submit.disabled = false;
+      showToast(error.message || 'Team could not be created');
+    }
+  });
+}
+
+function getInviteBaseUrl(token) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('invite', token);
+  if (cloud.roomId) url.searchParams.set('room', cloud.roomId);
+  url.hash = '';
+  return url.toString();
+}
+
+async function createInvite(kind, teamId = null) {
+  if (siteRuntime.ready) {
+    const payload = await siteRequest('/api/invites', {
+      method: 'POST',
+      body: JSON.stringify({ roomId: cloud.roomId, kind, teamId }),
+    });
+    return payload.url;
+  }
+  return getInviteBaseUrl(`local-${kind}-${teamId || cloud.roomId}-${Date.now().toString(36)}`);
+}
+
+function renderInviteResultModal(title, description, url) {
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="invite-result-title"><div class="modal-header"><div><p class="section-kicker">Ready to share</p><h2 id="invite-result-title">${escapeHTML(title)}</h2><p>${escapeHTML(description)}</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><div class="invite-result"><label for="invite-url">Invite link</label><div class="invite-url-row"><input id="invite-url" class="modal-input" readonly value="${escapeHTML(url)}" /><button class="primary-button" type="button" data-copy-invite>${icon('link')}Copy link</button></div><p class="modal-hint">Anyone who opens this link will be asked to sign in, then added to the intended room or team.</p></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Done</button></div></section></div>`;
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-copy-invite]').addEventListener('click', () => copyText(url, 'Invite link copied'));
+  document.querySelector('#invite-url').select();
+}
+
+async function openInviteLink(teamId, kind) {
+  const team = cloud.teams.find((candidate) => candidate.id === teamId);
+  try {
+    const url = await createInvite(kind, teamId);
+    renderInviteResultModal(kind === 'team' ? `Invite people to ${team?.name || 'the team'}` : `Invite ${team?.name || 'the team'} to ${getRoomName()}`, kind === 'team' ? 'Share this link with anyone who should join the team.' : 'Share this link with the team. Everyone currently on the team will receive access when the invite is accepted.', url);
+  } catch (error) {
+    showToast(error.message || 'Invite link could not be created');
+  }
+}
+
+function openShareModal() {
+  const teamOptions = cloud.teams.length ? cloud.teams.map((team) => `<option value="${escapeHTML(team.id)}">${escapeHTML(team.name)} · ${team.members?.length || team.memberCount || 0} people</option>`).join('') : '<option value="">Create a team first</option>';
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="share-room-title"><div class="modal-header"><div><p class="section-kicker">${escapeHTML(getRoomName())}</p><h2 id="share-room-title">Invite people to this room</h2><p>Invite one person, or bring a reusable team into the room in one step.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><div class="share-option-list"><button class="share-option" type="button" data-create-person-invite><span class="share-option-icon">${icon('users')}</span><span><strong>Invite people</strong><small>Create a link for individual teammates to join this room.</small></span>${icon('chevron')}</button><div class="share-option share-option-team"><span class="share-option-icon">${icon('layers')}</span><span class="share-option-copy"><strong>Invite a team</strong><small>Everyone on the selected team can join this room.</small></span><select class="modal-input" data-invite-team-select aria-label="Team to invite">${teamOptions}</select><button class="primary-button compact-button" type="button" data-create-team-room-invite ${cloud.teams.length ? '' : 'disabled'}>Create link</button></div></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button></div></section></div>`;
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-create-person-invite]').addEventListener('click', async () => {
+    try {
+      const url = await createInvite('room-person');
+      renderInviteResultModal(`Invite someone to ${getRoomName()}`, 'Share this link with a teammate who should estimate in this room.', url);
+    } catch (error) {
+      showToast(error.message || 'Invite link could not be created');
+    }
+  });
+  document.querySelector('[data-create-team-room-invite]')?.addEventListener('click', () => openInviteLink(document.querySelector('[data-invite-team-select]').value, 'room-team'));
 }
 
 function selectStory(storyId) {
@@ -1099,14 +1552,39 @@ function setBreakdown(kind) {
   });
 }
 
+function navigateToView(view) {
+  if (!['estimates', 'rooms', 'team', 'resources', 'settings'].includes(view)) return;
+  activeView = view;
+  window.history.pushState({}, '', `#${view}`);
+  render();
+}
+
+function updateRoomUrl(roomId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', roomId);
+  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}${activeView === 'estimates' ? '' : `#${activeView}`}`);
+}
+
+window.addEventListener('hashchange', () => {
+  activeView = getViewFromLocation();
+  render();
+});
+
+window.addEventListener('popstate', () => {
+  activeView = getViewFromLocation();
+  render();
+});
+
 async function shareRoom() {
-  const roomId = cloud.roomId || getConfiguredRoomId();
-  const url = roomId ? `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(roomId)}` : window.location.href;
+  openShareModal();
+}
+
+async function copyText(value, message = 'Link copied') {
   try {
-    await navigator.clipboard.writeText(url);
-    showToast('Room link copied — ready to share with the team');
+    await navigator.clipboard.writeText(value);
+    showToast(message);
   } catch {
-    showToast(roomId ? 'Room link ready in the address bar' : 'Sign in and configure a room before sharing');
+    showToast('Link ready — copy it from the address bar or modal');
   }
 }
 
@@ -1207,6 +1685,7 @@ async function refreshSiteState({ renderAfter = true } = {}) {
     const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
     const payload = await siteRequest(`/api/state${roomId}`);
     cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
+    if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
     if (applySiteState(payload.state)) persistLocalState();
     cloud.status = 'synced';
     if (renderAfter) render();
@@ -1278,16 +1757,43 @@ async function clearSiteVotes() {
   }
 }
 
+async function acceptPendingInvite() {
+  const token = new URLSearchParams(window.location.search).get('invite');
+  if (!token || !cloud.user) return null;
+  const preview = await siteRequest(`/api/invites?token=${encodeURIComponent(token)}`);
+  const result = await siteRequest('/api/invites/accept', { method: 'POST', body: JSON.stringify({ token }) });
+  const roomId = result.roomId || preview.invite?.room?.id || null;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('invite');
+  if (roomId) url.searchParams.set('room', roomId);
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  if (result.teamId && !roomId) showToast(`You joined ${preview.invite?.team?.name || 'the team'}`);
+  else if (roomId) showToast(`You joined ${preview.invite?.room?.name || 'the room'}`);
+  return roomId;
+}
+
 async function initializeSitesBackend() {
   if (!siteRuntime.enabled) return;
   cloud.status = 'connecting';
   updateCloudStatusBadge();
   render();
   try {
-    const me = await siteRequest('/api/me');
+    const configuredRoomId = getConfiguredRoomId();
+    let me;
+    try {
+      me = await siteRequest(`/api/me${configuredRoomId ? `?room=${encodeURIComponent(configuredRoomId)}` : ''}`);
+    } catch (error) {
+      const hasInvite = new URLSearchParams(window.location.search).has('invite');
+      if (error.status !== 403 || !hasInvite) throw error;
+      await acceptPendingInvite();
+      const acceptedRoomId = getConfiguredRoomId();
+      me = await siteRequest(`/api/me${acceptedRoomId ? `?room=${encodeURIComponent(acceptedRoomId)}` : ''}`);
+    }
     cloud.user = me.user || null;
     cloud.roomId = me.roomId || null;
+    cloud.room = normalizeRoomRecord(me.room);
     cloud.memberCount = Math.max(1, Number(me.memberCount) || 1);
+    activeRoomId = cloud.roomId || activeRoomId;
     if (cloud.roomId) localStorage.setItem(ROOM_ID_KEY, cloud.roomId);
 
     const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
@@ -1301,6 +1807,7 @@ async function initializeSitesBackend() {
     siteRuntime.ready = true;
     cloud.status = 'synced';
     render();
+    await refreshWorkspaceData();
     startSitePolling();
   } catch (error) {
     cloud.user = null;

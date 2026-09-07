@@ -12,6 +12,7 @@ export const rooms = sqliteTable('rooms', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   piLabel: text('pi_label').notNull(),
+  ownerAccountId: text('owner_account_id').references(() => accounts.id, { onDelete: 'set null' }),
   sequenceKey: text('sequence_key').notNull().default('fibonacci'),
   selectedStoryKey: text('selected_story_key'),
   voteMode: text('vote_mode').notNull().default('hidden'),
@@ -26,6 +27,36 @@ export const roomMembers = sqliteTable('room_members', {
   createdAt: text('created_at').notNull(),
 }, (table) => ({
   roomMembersPk: primaryKey({ columns: [table.roomId, table.accountId] }),
+}));
+
+export const teams = sqliteTable('teams', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  ownerAccountId: text('owner_account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const teamMembers = sqliteTable('team_members', {
+  teamId: text('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().default('member'),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  teamMembersPk: primaryKey({ columns: [table.teamId, table.accountId] }),
+}));
+
+export const roomInvites = sqliteTable('room_invites', {
+  token: text('token').primaryKey(),
+  roomId: text('room_id').references(() => rooms.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  createdBy: text('created_by').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').notNull(),
+  expiresAt: text('expires_at'),
+}, (table) => ({
+  roomInvitesRoomIdx: index('room_invites_room_idx').on(table.roomId),
+  roomInvitesTeamIdx: index('room_invites_team_idx').on(table.teamId),
 }));
 
 export const domains = sqliteTable('domains', {

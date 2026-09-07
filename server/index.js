@@ -3,6 +3,8 @@ const DEFAULT_ROOM_NAME = 'Commerce platform';
 const DEFAULT_PI_LABEL = 'PI 24';
 const ALLOWED_SEQUENCES = new Set(['sequential', 'fibonacci', 'modified']);
 const ALLOWED_PHASES = new Set(['idle', 'voting', 'revealed']);
+const ALLOWED_INVITE_KINDS = new Set(['room-person', 'room-team', 'team']);
+const ROOM_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 const MAX_BODY_BYTES = 1_500_000;
 const STATIC_ASSETS = new Map();
 
@@ -39,7 +41,7 @@ function getIdentity(request) {
 
 function roomIdFromRequest(request) {
   const requested = new URL(request.url).searchParams.get('room');
-  return requested === DEFAULT_ROOM_ID ? requested : DEFAULT_ROOM_ID;
+  return requested && ROOM_ID_PATTERN.test(requested) ? requested : DEFAULT_ROOM_ID;
 }
 
 function rows(result) {
@@ -60,6 +62,15 @@ function cleanText(value, fallback = '', maxLength = 5000) {
 function cleanId(value, fallback = '') {
   const id = cleanText(value, fallback, 120);
   return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(id) ? id : fallback;
+}
+
+function makeId(prefix) {
+  return `${prefix}-${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;
+}
+
+function cleanInviteToken(value) {
+  const token = cleanText(value, '', 160);
+  return /^[a-zA-Z0-9._:-]{8,160}$/.test(token) ? token : '';
 }
 
 function parseAcceptance(value) {
@@ -160,9 +171,12 @@ async function ensureAccountAndRoom(db, user) {
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET email = excluded.email, display_name = excluded.display_name, updated_at = excluded.updated_at`)
       .bind(user.id, email, user.name || null, now, now),
-    db.prepare(`INSERT OR IGNORE INTO rooms (id, name, pi_label, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
-      VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`)
-      .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, 'fibonacci', 'hidden', now, now),
+    db.prepare(`INSERT OR IGNORE INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`)
+      .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, 'fibonacci', 'hidden', now, now),
+    db.prepare(`UPDATE rooms SET owner_account_id = COALESCE(owner_account_id, ?)
+      WHERE id = ?`)
+      .bind(user.id, DEFAULT_ROOM_ID),
     db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
       VALUES (?, ?, 'editor', ?)`)
       .bind(DEFAULT_ROOM_ID, user.id, now),
@@ -170,7 +184,7 @@ async function ensureAccountAndRoom(db, user) {
 }
 
 async function requireMember(db, roomId, userId) {
-  const member = await db.prepare('SELECT 1 AS ok FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+  const member = await db.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
     .bind(roomId, userId)
     .first();
   if (!member) {
@@ -178,10 +192,25 @@ async function requireMember(db, roomId, userId) {
     error.status = 403;
     throw error;
   }
+  return member;
+}
+
+async function requireTeamMember(db, teamId, userId) {
+  const member = await db.prepare(`SELECT tm.role, t.owner_account_id
+    FROM team_members tm JOIN teams t ON t.id = tm.team_id
+    WHERE tm.team_id = ? AND tm.account_id = ? LIMIT 1`)
+    .bind(teamId, userId)
+    .first();
+  if (!member) {
+    const error = new Error('You do not have access to this team');
+    error.status = 403;
+    throw error;
+  }
+  return member;
 }
 
 async function readRoomState(db, roomId, userId) {
-  const room = await db.prepare(`SELECT id, sequence_key, selected_story_key, vote_mode
+  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
 
@@ -285,6 +314,12 @@ async function readRoomState(db, roomId, userId) {
 
   return {
     memberCount: Math.max(1, Number(memberResult?.count) || 1),
+    room: {
+      id: room.id,
+      name: room.name,
+      piLabel: room.pi_label,
+      role: room.owner_account_id === userId ? 'owner' : 'member',
+    },
     state: stories.length
       ? {
         resourceModelVersion: 1,
@@ -296,6 +331,68 @@ async function readRoomState(db, roomId, userId) {
         round,
       }
       : null,
+  };
+}
+
+async function readRooms(db, userId) {
+  const result = await db.prepare(`SELECT r.id, r.name, r.pi_label, r.owner_account_id,
+      COUNT(all_members.account_id) AS member_count, mine.role
+    FROM rooms r
+    JOIN room_members mine ON mine.room_id = r.id AND mine.account_id = ?
+    LEFT JOIN room_members all_members ON all_members.room_id = r.id
+    GROUP BY r.id, r.name, r.pi_label, r.owner_account_id, mine.role
+    ORDER BY r.updated_at DESC, r.id`).bind(userId).all();
+  return rows(result).map((room) => ({
+    id: room.id,
+    name: room.name,
+    piLabel: room.pi_label,
+    memberCount: Math.max(1, Number(room.member_count) || 1),
+    role: room.owner_account_id === userId ? 'owner' : room.role === 'owner' ? 'owner' : 'member',
+  }));
+}
+
+async function readTeams(db, userId) {
+  const result = await db.prepare(`SELECT t.id, t.name, t.owner_account_id, tm.role,
+      COUNT(all_members.account_id) AS member_count
+    FROM teams t
+    JOIN team_members tm ON tm.team_id = t.id AND tm.account_id = ?
+    LEFT JOIN team_members all_members ON all_members.team_id = t.id
+    GROUP BY t.id, t.name, t.owner_account_id, tm.role
+    ORDER BY t.updated_at DESC, t.id`).bind(userId).all();
+  const teams = await Promise.all(rows(result).map(async (team) => {
+    const members = await db.prepare(`SELECT a.id, a.display_name, a.email, tm.role
+      FROM team_members tm JOIN accounts a ON a.id = tm.account_id
+      WHERE tm.team_id = ? ORDER BY tm.role DESC, a.display_name, a.email`).bind(team.id).all();
+    return {
+      id: team.id,
+      name: team.name,
+      role: team.owner_account_id === userId ? 'owner' : team.role === 'owner' ? 'owner' : 'member',
+      memberCount: Math.max(0, Number(team.member_count) || 0),
+      members: rows(members).map((member) => ({
+        id: member.id,
+        name: member.display_name || member.email?.split('@')[0] || 'Planner',
+        email: member.email || '',
+        role: member.role === 'owner' ? 'owner' : 'member',
+      })),
+    };
+  }));
+  return teams;
+}
+
+async function readInvite(db, token) {
+  const invite = await db.prepare(`SELECT ri.token, ri.kind, ri.room_id, ri.team_id, ri.expires_at,
+      r.name AS room_name, r.pi_label, t.name AS team_name
+    FROM room_invites ri
+    LEFT JOIN rooms r ON r.id = ri.room_id
+    LEFT JOIN teams t ON t.id = ri.team_id
+    WHERE ri.token = ? LIMIT 1`).bind(token).first();
+  if (!invite) return null;
+  if (invite.expires_at && invite.expires_at < new Date().toISOString()) return null;
+  return {
+    token: invite.token,
+    kind: invite.kind,
+    room: invite.room_id ? { id: invite.room_id, name: invite.room_name, piLabel: invite.pi_label } : null,
+    team: invite.team_id ? { id: invite.team_id, name: invite.team_name } : null,
   };
 }
 
@@ -359,18 +456,147 @@ async function saveRoomState(db, roomId, input) {
   await runBatches(db, statements);
 }
 
+async function createRoom(db, user, input) {
+  const name = cleanText(input?.name, '', 80);
+  const piLabel = cleanText(input?.piLabel, '', 40);
+  if (!name || !piLabel) {
+    const error = new Error('Room name and increment label are required');
+    error.status = 400;
+    throw error;
+  }
+
+  const roomId = makeId('room');
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', ?, ?)`)
+      .bind(roomId, name, piLabel, user.id, now, now),
+    db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'owner', ?)`)
+      .bind(roomId, user.id, now),
+  ]);
+  await saveRoomState(db, roomId, input?.state || {});
+  return readRoomState(db, roomId, user.id);
+}
+
+async function createTeam(db, user, input) {
+  const name = cleanText(input?.name, '', 80);
+  if (!name) {
+    const error = new Error('Team name is required');
+    error.status = 400;
+    throw error;
+  }
+  const teamId = makeId('team');
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO teams (id, name, owner_account_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)`)
+      .bind(teamId, name, user.id, now, now),
+    db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
+      VALUES (?, ?, 'owner', ?)`)
+      .bind(teamId, user.id, now),
+  ]);
+  const teams = await readTeams(db, user.id);
+  return teams.find((team) => team.id === teamId);
+}
+
+async function createInvite(db, request, user, input) {
+  const kind = ALLOWED_INVITE_KINDS.has(input?.kind) ? input.kind : '';
+  const roomId = cleanId(input?.roomId);
+  const teamId = cleanId(input?.teamId);
+  if (!kind || (kind !== 'team' && !roomId) || (kind !== 'room-person' && !teamId)) {
+    const error = new Error('Invite target is incomplete');
+    error.status = 400;
+    throw error;
+  }
+  if (roomId) await requireMember(db, roomId, user.id);
+  if (teamId) await requireTeamMember(db, teamId, user.id);
+
+  const token = makeId('invite');
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  await db.prepare(`INSERT INTO room_invites (token, room_id, team_id, kind, created_by, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(token, roomId || null, teamId || null, kind, user.id, now, expiresAt)
+    .run();
+
+  const url = new URL(request.url);
+  url.pathname = '/';
+  url.search = '';
+  url.searchParams.set('invite', token);
+  if (roomId) url.searchParams.set('room', roomId);
+  return { token, kind, url: url.toString(), expiresAt };
+}
+
+async function acceptInvite(db, user, token) {
+  const invite = await readInvite(db, token);
+  if (!invite) {
+    const error = new Error('This invite link is missing or expired');
+    error.status = 404;
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const statements = [];
+  if (invite.kind === 'team') {
+    statements.push(db.prepare(`INSERT OR IGNORE INTO team_members (team_id, account_id, role, created_at)
+      VALUES (?, ?, 'member', ?)`)
+      .bind(invite.team.id, user.id, now));
+  } else if (invite.kind === 'room-team') {
+    statements.push(db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
+      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ?`)
+      .bind(invite.room.id, now, invite.team.id));
+    statements.push(db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?)`)
+      .bind(invite.room.id, user.id, now));
+  } else {
+    statements.push(db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?)`)
+      .bind(invite.room.id, user.id, now));
+  }
+  await db.batch(statements);
+  return { invite, roomId: invite.room?.id || null, teamId: invite.team?.id || null };
+}
+
 async function handleApi(request, env) {
   if (!env.DB) return json({ error: 'The Pointline database binding is not configured' }, 500);
+  const url = new URL(request.url);
   const user = getIdentity(request);
+  if (url.pathname === '/api/invites' && request.method === 'GET') {
+    const invite = await readInvite(env.DB, cleanInviteToken(url.searchParams.get('token')));
+    return invite ? json({ invite }) : json({ error: 'This invite link is missing or expired' }, 404);
+  }
   if (!user) return json({ error: 'Sign in with ChatGPT to use this planning room' }, 401);
   const roomId = roomIdFromRequest(request);
   await ensureAccountAndRoom(env.DB, user);
+
+  if (url.pathname === '/api/invites/accept' && request.method === 'POST') {
+    const input = await readJson(request);
+    const result = await acceptInvite(env.DB, user, cleanInviteToken(input.token));
+    return json({ ok: true, ...result });
+  }
+
   await requireMember(env.DB, roomId, user.id);
 
-  const url = new URL(request.url);
   if (url.pathname === '/api/me' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);
-    return json({ user, roomId, memberCount: room.memberCount });
+    return json({ user, roomId, room: room.room, memberCount: room.memberCount });
+  }
+  if (url.pathname === '/api/rooms' && request.method === 'GET') {
+    return json({ rooms: await readRooms(env.DB, user.id) });
+  }
+  if (url.pathname === '/api/rooms' && request.method === 'POST') {
+    const created = await createRoom(env.DB, user, await readJson(request));
+    return json({ ok: true, roomId: created.room.id, room: created.room, memberCount: created.memberCount, state: created.state }, 201);
+  }
+  if (url.pathname === '/api/teams' && request.method === 'GET') {
+    return json({ teams: await readTeams(env.DB, user.id) });
+  }
+  if (url.pathname === '/api/teams' && request.method === 'POST') {
+    const team = await createTeam(env.DB, user, await readJson(request));
+    return json({ ok: true, team }, 201);
+  }
+  if (url.pathname === '/api/invites' && request.method === 'POST') {
+    return json(await createInvite(env.DB, request, user, await readJson(request)), 201);
   }
   if (url.pathname === '/api/state' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);

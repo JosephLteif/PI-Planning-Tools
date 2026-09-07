@@ -19,10 +19,14 @@ The hosted Site uses Sites’ built-in **Sign in with ChatGPT** flow and a small
 After sign-in:
 
 - each ChatGPT identity is stored as an account and automatically joins the shared PI 24 room;
+- the Rooms page creates separate planning rooms with their own story queue and membership;
+- the Team page creates reusable teams, and invite links can add a person to a team, add a person to a room, or bring a team into a room;
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in D1;
 - votes are stored per account, story, and round;
 - hidden rounds return only your own vote plus the submitted count; open and revealed rounds return the room’s votes;
 - the browser polls the room while open so teammates can estimate the same story concurrently.
+
+The Estimates view keeps one active story in focus for the room. Each participant can submit a separate vote for that story, and hidden votes remain private until the round is revealed.
 
 The D1 schema is defined in [db/schema.ts](db/schema.ts), and the generated migration is under [drizzle](drizzle). The Worker API is [server/index.js](server/index.js). `.openai/hosting.json` declares the logical D1 binding; Sites owns the actual database resource.
 

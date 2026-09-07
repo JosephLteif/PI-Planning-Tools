@@ -8,6 +8,13 @@
       "when": 1788779313474,
       "tag": "0000_vengeful_triathlon",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788781709636,
+      "tag": "0001_overconfident_deathstrike",
+      "breakpoints": true
     }
   ]
 }
