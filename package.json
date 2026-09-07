@@ -1,7 +1,9 @@
 {
   "name": "pointline-pi-planning",
   "private": true,
+  "type": "module",
   "scripts": {
+    "build": "node scripts/build-site.cjs",
     "db:generate": "drizzle-kit generate"
   },
   "devDependencies": {

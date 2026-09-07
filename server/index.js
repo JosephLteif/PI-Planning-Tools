@@ -4,6 +4,7 @@ const DEFAULT_PI_LABEL = 'PI 24';
 const ALLOWED_SEQUENCES = new Set(['sequential', 'fibonacci', 'modified']);
 const ALLOWED_PHASES = new Set(['idle', 'voting', 'revealed']);
 const MAX_BODY_BYTES = 1_500_000;
+const STATIC_ASSETS = new Map();
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -424,7 +425,21 @@ async function handleApi(request, env) {
 
 async function serveStatic(request, env) {
   if (env.ASSETS && typeof env.ASSETS.fetch === 'function') return env.ASSETS.fetch(request);
-  return new Response('Not found', { status: 404 });
+  const requestedPath = new URL(request.url).pathname;
+  const assetPath = requestedPath === '/' ? '/index.html' : requestedPath;
+  const asset = STATIC_ASSETS.get(assetPath);
+  if (!asset) return new Response('Not found', { status: 404 });
+  const contentType = assetPath.endsWith('.html')
+    ? 'text/html; charset=utf-8'
+    : assetPath.endsWith('.css')
+      ? 'text/css; charset=utf-8'
+      : 'application/javascript; charset=utf-8';
+  return new Response(asset, {
+    headers: {
+      'content-type': contentType,
+      'cache-control': 'no-cache',
+    },
+  });
 }
 
 export default {
