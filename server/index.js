@@ -490,7 +490,16 @@ async function deleteManagedUser(db, user, accountId) {
   const target = await db.prepare('SELECT id FROM accounts WHERE id = ? LIMIT 1').bind(accountId).first();
   if (!target) throw authError('User not found', 404);
   if (target.id === user.id) throw authError('You cannot remove your own admin account', 400);
-  await db.prepare('DELETE FROM accounts WHERE id = ?').bind(accountId).run();
+  await db.batch([
+    db.prepare('DELETE FROM sessions WHERE account_id = ?').bind(accountId),
+    db.prepare('DELETE FROM room_members WHERE account_id = ?').bind(accountId),
+    db.prepare('DELETE FROM team_members WHERE account_id = ?').bind(accountId),
+    db.prepare('DELETE FROM votes WHERE account_id = ?').bind(accountId),
+    db.prepare('DELETE FROM room_invites WHERE created_by = ?').bind(accountId),
+    db.prepare('UPDATE rooms SET owner_account_id = NULL WHERE owner_account_id = ?').bind(accountId),
+    db.prepare('DELETE FROM teams WHERE owner_account_id = ?').bind(accountId),
+    db.prepare('DELETE FROM accounts WHERE id = ?').bind(accountId),
+  ]);
   return { accountId };
 }
 
