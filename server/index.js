@@ -105,20 +105,26 @@ function normalizeStateInput(input) {
     })).filter((service) => service.id && service.name)
     : [];
   const serviceIds = new Set(services.map((service) => service.id));
-  const stories = Array.isArray(source.stories)
+  const rawStories = Array.isArray(source.stories)
     ? source.stories.map((story) => ({
       id: cleanId(story?.id),
       type: cleanText(story?.type, 'Feature', 80),
+      epicId: cleanId(story?.epicId) || null,
       title: cleanText(story?.title, 'Untitled story', 500),
       description: cleanText(story?.description, 'A new story ready for the team to shape and estimate together.', 5000),
       acceptance: parseAcceptance(story?.acceptance),
-      manual: parseScore(story?.manual),
-      ai: parseScore(story?.ai),
-      aiEnabled: story?.aiEnabled === true || parseScore(story?.ai) !== null,
+      manual: story?.type === 'Epic' ? null : parseScore(story?.manual),
+      ai: story?.type === 'Epic' ? null : parseScore(story?.ai),
+      aiEnabled: story?.type !== 'Epic' && (story?.aiEnabled === true || parseScore(story?.ai) !== null),
       saved: story?.saved === true,
-      serviceLinks: normalizeLinks(story?.serviceLinks, serviceIds),
+      serviceLinks: story?.type === 'Epic' ? [] : normalizeLinks(story?.serviceLinks, serviceIds),
     })).filter((story) => story.id && story.title)
     : [];
+  const epicIds = new Set(rawStories.filter((story) => story.type === 'Epic').map((story) => story.id));
+  const stories = rawStories.map((story) => ({
+    ...story,
+    epicId: story.type === 'Epic' || !epicIds.has(story.epicId) ? null : story.epicId,
+  }));
   const roundSource = source.round && typeof source.round === 'object' ? source.round : {};
   const selectedStoryId = stories.some((story) => story.id === source.selectedStoryId)
     ? source.selectedStoryId
@@ -217,7 +223,7 @@ async function readRoomState(db, roomId, userId) {
   const [domainResult, serviceResult, storyResult, allocationResult, memberResult] = await Promise.all([
     db.prepare('SELECT id, name, sort_order FROM domains WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare('SELECT id, name, domain_id, sort_order FROM services WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
-    db.prepare(`SELECT story_key, type, title, description, acceptance_json, sort_order,
+    db.prepare(`SELECT story_key, type, epic_id, title, description, acceptance_json, sort_order,
       manual_estimate, ai_estimate, ai_enabled, saved
       FROM stories WHERE room_id = ? ORDER BY sort_order, story_key`).bind(roomId).all(),
     db.prepare(`SELECT story_key, service_id, allocation_pct
@@ -247,6 +253,7 @@ async function readRoomState(db, roomId, userId) {
     return {
       id: story.story_key,
       type: story.type || 'Feature',
+      epicId: story.epic_id || null,
       title: story.title,
       description: story.description || 'A new story ready for the team to shape and estimate together.',
       acceptance,
@@ -416,9 +423,32 @@ async function saveRoomState(db, roomId, input) {
   }
 
   const now = new Date().toISOString();
+  const storyIds = source.stories.map((story) => story.id);
+  const serviceIds = source.services.map((service) => service.id);
+  const domainIds = source.domains.map((domain) => domain.id);
+  const placeholders = (items) => items.length ? items.map(() => '?').join(', ') : '';
   const statements = [
     db.prepare(`UPDATE rooms SET sequence_key = ?, selected_story_key = ?, vote_mode = ?, updated_at = ? WHERE id = ?`)
       .bind(source.sequence, source.selectedStoryId, source.round.mode, now, roomId),
+    ...(domainIds.length
+      ? [db.prepare(`DELETE FROM domains WHERE room_id = ? AND id NOT IN (${placeholders(domainIds)})`).bind(roomId, ...domainIds)]
+      : [db.prepare('DELETE FROM domains WHERE room_id = ?').bind(roomId)]),
+    ...(serviceIds.length
+      ? [db.prepare(`DELETE FROM services WHERE room_id = ? AND id NOT IN (${placeholders(serviceIds)})`).bind(roomId, ...serviceIds)]
+      : [db.prepare('DELETE FROM services WHERE room_id = ?').bind(roomId)]),
+    ...(storyIds.length
+      ? [
+        db.prepare(`DELETE FROM votes WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
+        db.prepare(`DELETE FROM planning_rounds WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
+        db.prepare(`DELETE FROM story_service_allocations WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
+        db.prepare(`DELETE FROM stories WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
+      ]
+      : [
+        db.prepare('DELETE FROM votes WHERE room_id = ?').bind(roomId),
+        db.prepare('DELETE FROM planning_rounds WHERE room_id = ?').bind(roomId),
+        db.prepare('DELETE FROM story_service_allocations WHERE room_id = ?').bind(roomId),
+        db.prepare('DELETE FROM stories WHERE room_id = ?').bind(roomId),
+      ]),
     ...source.domains.map((domain, index) => db.prepare(`INSERT INTO domains (room_id, id, name, sort_order)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(room_id, id) DO UPDATE SET name = excluded.name, sort_order = excluded.sort_order`)
@@ -428,13 +458,13 @@ async function saveRoomState(db, roomId, input) {
       ON CONFLICT(room_id, id) DO UPDATE SET name = excluded.name, domain_id = excluded.domain_id, sort_order = excluded.sort_order, active = 1`)
       .bind(roomId, service.id, service.name, service.domainId || null, index)),
     ...source.stories.map((story, index) => db.prepare(`INSERT INTO stories
-      (room_id, story_key, type, title, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (room_id, story_key, type, epic_id, title, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id, story_key) DO UPDATE SET type = excluded.type, title = excluded.title,
-        description = excluded.description, acceptance_json = excluded.acceptance_json, sort_order = excluded.sort_order,
+        epic_id = excluded.epic_id, description = excluded.description, acceptance_json = excluded.acceptance_json, sort_order = excluded.sort_order,
         manual_estimate = excluded.manual_estimate, ai_estimate = excluded.ai_estimate,
         ai_enabled = excluded.ai_enabled, saved = excluded.saved`)
-      .bind(roomId, story.id, story.type, story.title, story.description, JSON.stringify(story.acceptance), index,
+      .bind(roomId, story.id, story.type, story.epicId, story.title, story.description, JSON.stringify(story.acceptance), index,
         story.manual, story.ai, story.aiEnabled ? 1 : 0, story.saved ? 1 : 0)),
     ...source.stories.map((story) => db.prepare('DELETE FROM story_service_allocations WHERE room_id = ? AND story_key = ?')
       .bind(roomId, story.id)),
@@ -477,6 +507,48 @@ async function createRoom(db, user, input) {
   ]);
   await saveRoomState(db, roomId, input?.state || {});
   return readRoomState(db, roomId, user.id);
+}
+
+async function deleteRoom(db, user, roomId) {
+  if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
+    const error = new Error('The room to remove is invalid');
+    error.status = 400;
+    throw error;
+  }
+  if (roomId === DEFAULT_ROOM_ID) {
+    const error = new Error('The default room cannot be removed');
+    error.status = 400;
+    throw error;
+  }
+  const room = await db.prepare('SELECT id, owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  if (!room) {
+    const error = new Error('Room not found');
+    error.status = 404;
+    throw error;
+  }
+  if (room.owner_account_id !== user.id) {
+    const error = new Error('Only the room owner can remove this room');
+    error.status = 403;
+    throw error;
+  }
+  const roomCount = await db.prepare('SELECT COUNT(*) AS count FROM room_members WHERE account_id = ?').bind(user.id).first();
+  if (Number(roomCount?.count) <= 1) {
+    const error = new Error('Keep at least one planning room in your workspace');
+    error.status = 400;
+    throw error;
+  }
+  await db.batch([
+    db.prepare('DELETE FROM votes WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM planning_rounds WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM story_service_allocations WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM stories WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM services WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM domains WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM room_invites WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM room_members WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM rooms WHERE id = ? AND owner_account_id = ?').bind(roomId, user.id),
+  ]);
+  return { ok: true, roomId };
 }
 
 async function createTeam(db, user, input) {
@@ -575,14 +647,26 @@ async function handleApi(request, env) {
     return json({ ok: true, ...result });
   }
 
+  const roomPathMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
+  if (roomPathMatch && request.method === 'DELETE') {
+    let targetRoomId = '';
+    try {
+      targetRoomId = decodeURIComponent(roomPathMatch[1]);
+    } catch {
+      targetRoomId = '';
+    }
+    return json(await deleteRoom(env.DB, user, targetRoomId));
+  }
+
+  if (url.pathname === '/api/rooms' && request.method === 'GET') {
+    return json({ rooms: await readRooms(env.DB, user.id) });
+  }
+
   await requireMember(env.DB, roomId, user.id);
 
   if (url.pathname === '/api/me' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);
     return json({ user, roomId, room: room.room, memberCount: room.memberCount });
-  }
-  if (url.pathname === '/api/rooms' && request.method === 'GET') {
-    return json({ rooms: await readRooms(env.DB, user.id) });
   }
   if (url.pathname === '/api/rooms' && request.method === 'POST') {
     const created = await createRoom(env.DB, user, await readJson(request));
@@ -616,6 +700,10 @@ async function handleApi(request, env) {
       .bind(roomId, storyId, roundNumber)
       .first();
     if (!round || round.phase !== 'voting') return json({ error: 'This voting round is no longer accepting votes' }, 409);
+    const story = await env.DB.prepare('SELECT type FROM stories WHERE room_id = ? AND story_key = ? LIMIT 1')
+      .bind(roomId, storyId)
+      .first();
+    if (!story || story.type === 'Epic') return json({ error: 'Epics are estimated through their linked stories' }, 409);
 
     const manual = parseScore(input.manual);
     const ai = parseScore(input.ai);

@@ -2,7 +2,19 @@ const STORAGE_KEY = 'pointline-pi-room-v1';
 const PARTICIPANT_ID_KEY = 'pointline-participant-id-v1';
 const ROOM_ID_KEY = 'pointline-room-id-v1';
 const WORKSPACE_KEY = 'pointline-workspace-v1';
+const THEME_KEY = 'pointline-theme-v1';
 const LOCAL_DEFAULT_ROOM_ID = 'local-commerce';
+
+function loadTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+let theme = loadTheme();
+document.documentElement.dataset.theme = theme;
 
 const sequences = {
   sequential: {
@@ -131,7 +143,7 @@ const defaultState = {
   resourceModelVersion: 1,
   sequence: 'fibonacci',
   selectedStoryId: 'PL-104',
-  stories: initialStories,
+  stories: initialStories.map((story) => ({ ...story, epicId: null })),
   domains: defaultDomains,
   services: defaultServices,
   round: {
@@ -291,19 +303,29 @@ function loadState(roomId = LOCAL_DEFAULT_ROOM_ID) {
       ? saved.selectedStoryId
       : saved.stories[0]?.id || defaultState.selectedStoryId;
     const hasResourceModel = saved.resourceModelVersion === 1;
+    const normalizedStories = saved.stories.map((story) => ({
+      ...story,
+      epicId: String(story.epicId || '').trim() || null,
+      manual: normalizeEstimate(story.manual),
+      ai: normalizeEstimate(story.ai),
+      aiEnabled: story.aiEnabled ?? normalizeEstimate(story.ai) !== null,
+      serviceLinks: Array.isArray(story.serviceLinks) && (hasResourceModel || story.serviceLinks.length)
+        ? normalizeServiceLinks(story.serviceLinks)
+        : structuredClone(initialStories.find((defaultStory) => defaultStory.id === story.id)?.serviceLinks || []),
+    }));
+    const epicIds = new Set(normalizedStories.filter((story) => story.type === 'Epic').map((story) => story.id));
 
     return {
       resourceModelVersion: 1,
       sequence: sequences[saved.sequence] ? saved.sequence : defaultState.sequence,
       selectedStoryId,
-      stories: saved.stories.map((story) => ({
+      stories: normalizedStories.map((story) => ({
         ...story,
-        manual: normalizeEstimate(story.manual),
-        ai: normalizeEstimate(story.ai),
-        aiEnabled: story.aiEnabled ?? normalizeEstimate(story.ai) !== null,
-        serviceLinks: Array.isArray(story.serviceLinks) && (hasResourceModel || story.serviceLinks.length)
-          ? normalizeServiceLinks(story.serviceLinks)
-          : structuredClone(initialStories.find((defaultStory) => defaultStory.id === story.id)?.serviceLinks || []),
+        epicId: story.type === 'Epic' || !epicIds.has(story.epicId) ? null : story.epicId,
+        manual: story.type === 'Epic' ? null : story.manual,
+        ai: story.type === 'Epic' ? null : story.ai,
+        aiEnabled: story.type !== 'Epic' && story.aiEnabled,
+        serviceLinks: story.type === 'Epic' ? [] : story.serviceLinks,
       })),
       domains: Array.isArray(saved.domains)
         ? saved.domains.map((domain) => ({ id: String(domain.id), name: String(domain.name).trim() })).filter((domain) => domain.name)
@@ -367,6 +389,8 @@ function icon(name, className = '') {
     share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.2-1.2"/>',
     bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+    moon: '<path d="M20.5 15.6A8.5 8.5 0 0 1 8.4 3.5 8.5 8.5 0 1 0 20.5 15.6Z"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     sparkle: '<path d="m12 3-1.5 5.5L5 10l5.5 1.5L12 17l1.5-5.5L19 10l-5.5-1.5L12 3ZM19 16l-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7L19 16Z"/>',
     refresh: '<path d="M20 11a8 8 0 0 0-14.7-4L4 9"/><path d="M4 4v5h5M4 13a8 8 0 0 0 14.7 4L20 15"/><path d="M20 20v-5h-5"/>',
@@ -388,6 +412,34 @@ function icon(name, className = '') {
 
 function getSelectedStory() {
   return state.stories.find((story) => story.id === state.selectedStoryId) || state.stories[0];
+}
+
+function getEpicForStory(story) {
+  if (!story) return null;
+  return story.type === 'Epic'
+    ? story
+    : state.stories.find((candidate) => candidate.id === story.epicId && candidate.type === 'Epic') || null;
+}
+
+function getEpicMetrics(story) {
+  const epic = getEpicForStory(story);
+  if (!epic) return null;
+  const children = state.stories.filter((candidate) => candidate.epicId === epic.id && candidate.type !== 'Epic');
+  const manualStories = children.filter((candidate) => candidate.manual !== null);
+  const aiStories = children.filter((candidate) => candidate.ai !== null);
+  const pairedStories = children.filter((candidate) => candidate.manual !== null && candidate.ai !== null);
+  const manualPoints = manualStories.reduce((total, candidate) => total + candidate.manual, 0);
+  const aiPoints = aiStories.reduce((total, candidate) => total + candidate.ai, 0);
+  return {
+    epic,
+    children,
+    manualStories,
+    aiStories,
+    pairedStories,
+    manualPoints,
+    aiPoints,
+    progress: children.length ? Math.round((manualStories.length / children.length) * 100) : 0,
+  };
 }
 
 function formatScore(score) {
@@ -518,6 +570,20 @@ function renderCloudStatus() {
   return `${icon('clock')} Local demo · browser saved`;
 }
 
+function renderThemeToggle() {
+  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+  return `<button class="icon-button theme-toggle" type="button" data-theme-toggle aria-label="Use ${nextTheme} mode" title="Use ${nextTheme} mode">${icon(theme === 'dark' ? 'sun' : 'moon')}</button>`;
+}
+
+function renderEpicMetrics(story) {
+  const metrics = getEpicMetrics(story);
+  if (!metrics) return '';
+  const difference = metrics.children.length && metrics.pairedStories.length === metrics.children.length
+    ? metrics.aiPoints - metrics.manualPoints
+    : null;
+  return `<section class="epic-metrics" aria-label="Epic metrics"><div class="epic-metrics-heading"><div><p class="section-kicker">Epic roll-up</p><h3>${escapeHTML(metrics.epic.title)}</h3><p>Estimate the linked stories below; the epic totals update automatically.</p></div><span class="epic-progress">${metrics.progress}% complete</span></div><div class="epic-metric-grid"><div><span>Child stories</span><strong>${metrics.children.length}</strong><small>${metrics.manualStories.length} estimated</small></div><div><span>Team points</span><strong>${formatScore(metrics.manualPoints)}</strong><small>${metrics.manualStories.length} stories</small></div><div><span>AI points</span><strong>${formatScore(metrics.aiPoints)}</strong><small>${metrics.aiStories.length} with AI</small></div><div><span>AI vs team</span><strong>${difference === null ? '—' : `${difference >= 0 ? '+' : ''}${formatScore(difference)}`}</strong><small>${metrics.pairedStories.length}/${metrics.children.length || 0} paired stories</small></div></div><div class="epic-progress-bar"><span style="width: ${metrics.progress}%"></span></div></section>`;
+}
+
 function renderStoryServices(story) {
   const links = normalizeServiceLinks(story.serviceLinks);
   const total = getStoryAllocationTotal(story);
@@ -538,7 +604,8 @@ function renderStoryServices(story) {
 function renderBreakdownRows(kind) {
   const { rows, totalPoints } = getAllocationRows(kind);
   const maximum = Math.max(...rows.map((row) => row.points), 1);
-  return `<div class="breakdown-total"><span>${formatScore(totalPoints)} estimated points</span><span>${state.stories.filter((story) => story.manual !== null).length}/${state.stories.length} stories scored</span></div><div class="breakdown-list">${rows.map((row) => `<div class="breakdown-row"><div class="breakdown-row-top"><strong>${escapeHTML(row.name)}</strong><span>${formatScore(row.points)} pts · ${Math.round(row.percent)}%</span></div><div class="breakdown-bar"><span style="width: ${Math.min(100, row.points / maximum * 100)}%"></span></div><div class="breakdown-row-foot">${row.storyCount} ${row.storyCount === 1 ? 'story' : 'stories'}</div></div>`).join('')}</div>`;
+  const estimableStories = state.stories.filter((story) => story.type !== 'Epic');
+  return `<div class="breakdown-total"><span>${formatScore(totalPoints)} estimated points</span><span>${estimableStories.filter((story) => story.manual !== null).length}/${estimableStories.length} stories scored</span></div><div class="breakdown-list">${rows.map((row) => `<div class="breakdown-row"><div class="breakdown-row-top"><strong>${escapeHTML(row.name)}</strong><span>${formatScore(row.points)} pts · ${Math.round(row.percent)}%</span></div><div class="breakdown-bar"><span style="width: ${Math.min(100, row.points / maximum * 100)}%"></span></div><div class="breakdown-row-foot">${row.storyCount} ${row.storyCount === 1 ? 'story' : 'stories'}</div></div>`).join('')}</div>`;
 }
 
 function renderVoteField(type, vote) {
@@ -595,7 +662,7 @@ function renderSidebar(view = activeView) {
     ${renderRoomSelector()}
 
     <nav class="sidebar-nav" aria-label="Workspace navigation">
-      <button class="nav-link ${view === 'estimates' ? 'active' : ''}" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${state.stories.filter((story) => story.manual !== null).length}/${state.stories.length}</span></button>
+      <button class="nav-link ${view === 'estimates' ? 'active' : ''}" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${state.stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length}/${state.stories.filter((story) => story.type !== 'Epic').length}</span></button>
       <button class="nav-link ${view === 'team' ? 'active' : ''}" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
       <button class="nav-link ${view === 'resources' ? 'active' : ''}" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
       <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
@@ -616,6 +683,7 @@ function renderTopbar(view = activeView) {
     <div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<span>${escapeHTML(getRoomName())}</span>${icon('chevron')}<span>${labels[view]}</span></div>
     <div class="topbar-actions">
       <button class="icon-button" type="button" data-notifications aria-label="Notifications">${icon('bell')}</button>
+      ${renderThemeToggle()}
       <button class="outline-button" type="button" data-share>${icon('share')}Invite</button>
       ${renderAuthAction()}
     </div>
@@ -629,7 +697,7 @@ function renderRoomsPage() {
   </section>
   <section class="management-section">
     <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
-    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : 'Member'}</span><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
+    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
   </section>`;
 }
 
@@ -680,17 +748,18 @@ function render() {
     return;
   }
   const selectedStory = getSelectedStory();
-  const estimatedCount = state.stories.filter((story) => story.manual !== null).length;
-  const aiCount = state.stories.filter((story) => story.ai !== null).length;
-  const pairedStories = state.stories.filter((story) => story.manual !== null && story.ai !== null);
+  const estimableStories = state.stories.filter((story) => story.type !== 'Epic');
+  const estimatedCount = estimableStories.filter((story) => story.manual !== null).length;
+  const aiCount = estimableStories.filter((story) => story.ai !== null).length;
+  const pairedStories = estimableStories.filter((story) => story.manual !== null && story.ai !== null);
   const agreementCount = pairedStories.filter((story) => story.manual === story.ai).length;
   const agreement = pairedStories.length ? Math.round((agreementCount / pairedStories.length) * 100) : 0;
-  const manualScores = state.stories.map((story) => story.manual).filter((score) => score !== null);
+  const manualScores = estimableStories.map((story) => story.manual).filter((score) => score !== null);
   const manualAverage = manualScores.length
     ? (manualScores.reduce((total, score) => total + score, 0) / manualScores.length).toFixed(1)
     : '—';
   const storyIndex = Math.max(0, state.stories.findIndex((story) => story.id === selectedStory.id));
-  const progress = Math.round((estimatedCount / state.stories.length) * 100);
+  const progress = estimableStories.length ? Math.round((estimatedCount / estimableStories.length) * 100) : 0;
 
   document.querySelector('#app').innerHTML = `
     <aside class="sidebar">
@@ -718,6 +787,7 @@ function render() {
         <div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<span>${escapeHTML(getRoomName())}</span>${icon('chevron')}<span>Estimates</span></div>
         <div class="topbar-actions">
           <button class="icon-button" type="button" data-notifications aria-label="Notifications">${icon('bell')}</button>
+          ${renderThemeToggle()}
           <button class="outline-button" type="button" data-share>${icon('share')}Invite</button>
           ${renderAuthAction()}
         </div>
@@ -769,7 +839,9 @@ function render() {
               <div class="acceptance-list">${selectedStory.acceptance.map((item) => `<span class="acceptance-chip">${icon('check')}${escapeHTML(item)}</span>`).join('')}</div>
             </article>
 
-            <section class="estimate-section">
+            ${renderEpicMetrics(selectedStory)}
+
+            ${selectedStory.type !== 'Epic' ? `<section class="estimate-section">
               <div class="estimate-section-heading"><h3>Record the final perspectives</h3><p>${sequences[state.sequence].helper} · select or enter a custom value</p></div>
               <div class="estimate-fields">
                 ${renderEstimateField('manual', selectedStory)}
@@ -781,18 +853,19 @@ function render() {
               <div class="status-message">${selectedStory.saved ? `${icon('check')} Saved to the room` : `${icon('clock')} Not estimated yet`}</div>
               <div class="footer-actions"><button class="outline-button" type="button" data-reset>${icon('refresh')}Clear</button><button class="primary-button" type="button" data-save-next>Save &amp; next ${icon('chevron')}</button></div>
             </div>
+            </section>` : `<div class="epic-estimate-note">${icon('layers')} This epic is a roll-up. Select one of its linked stories in the queue to record an estimate.</div>`}
           </section>
 
           <aside class="card queue-card" aria-label="Story queue">
             <div class="queue-header"><div><h2>Story queue</h2><p>Pick a story to estimate</p></div><div class="queue-header-actions"><button class="outline-button import-button" type="button" data-import-stories="true" onclick="openImportModal()">${icon('upload')}Import</button><button class="icon-button" type="button" data-new-story aria-label="Add a new story">${icon('plus')}</button></div></div>
             <div class="story-list">${state.stories.map((story, index) => renderStoryRow(story, index)).join('')}</div>
-            <div class="queue-footer">${icon('clock')} ${state.stories.length - estimatedCount} stories still need a team estimate</div>
+            <div class="queue-footer">${icon('clock')} ${estimableStories.length - estimatedCount} stories still need a team estimate</div>
           </aside>
         </div>
 
         <section class="card team-round-card" aria-label="Team round">
           <div class="team-round-card-heading"><div><p class="section-kicker">Room-level activity</p><h2>Team round</h2><p>Run the shared vote for the current story. Point sequence and room defaults live in Room settings.</p></div><button class="outline-button compact-button" type="button" data-nav="settings">${icon('settings')}Room settings</button></div>
-          ${renderVotePanel(selectedStory)}
+          ${selectedStory.type === 'Epic' ? '<div class="epic-estimate-note team-round-placeholder">Select a linked story to start the team round.</div>' : renderVotePanel(selectedStory)}
         </section>
 
         <div class="lower-grid lower-grid-single">
@@ -827,13 +900,15 @@ function renderEstimateField(type, story) {
 }
 
 function renderStoryRow(story, index) {
-  const status = story.manual !== null ? 'Estimated' : 'Needs estimate';
+  const epic = getEpicForStory(story);
+  const status = story.type === 'Epic' ? 'Epic · roll-up' : story.manual !== null ? 'Estimated' : 'Needs estimate';
+  const parentLabel = story.type !== 'Epic' && epic ? ` · ${epic.title}` : '';
   const canDelete = state.stories.length > 1;
   return `<div class="story-row ${story.id === state.selectedStoryId ? 'active' : ''}">
     <button class="story-row-main" type="button" data-story-id="${escapeHTML(story.id)}">
       <span class="story-number">${String(index + 1).padStart(2, '0')}</span>
-      <span class="story-row-copy"><strong>${escapeHTML(story.title)}</strong><span>${escapeHTML(story.id)} · ${status}</span></span>
-      <span class="story-score"><span class="score-pill ${story.manual === null ? 'empty' : 'manual'}">${formatScore(story.manual)}</span><span class="score-pill ${story.ai === null ? 'empty' : 'ai'}">${formatScore(story.ai)}</span></span>
+      <span class="story-row-copy"><strong>${escapeHTML(story.title)}</strong><span>${escapeHTML(story.id)} · ${status}${escapeHTML(parentLabel)}</span></span>
+      <span class="story-score">${story.type === 'Epic' ? '<span class="score-pill epic-pill">Epic</span>' : `<span class="score-pill ${story.manual === null ? 'empty' : 'manual'}">${formatScore(story.manual)}</span><span class="score-pill ${story.ai === null ? 'empty' : 'ai'}">${formatScore(story.ai)}</span>`}</span>
     </button>
     <span class="story-row-actions" aria-label="Actions for ${escapeHTML(story.title)}">
       <button class="story-action-button" type="button" data-move-story="up" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} up" ${index === 0 ? 'disabled' : ''}>${icon('chevronUp')}</button>
@@ -845,7 +920,7 @@ function renderStoryRow(story, index) {
 }
 
 function renderHistoryRows() {
-  const rows = state.stories.filter((story) => story.manual !== null || story.ai !== null).slice(0, 5);
+  const rows = state.stories.filter((story) => story.type !== 'Epic' && (story.manual !== null || story.ai !== null)).slice(0, 5);
   if (!rows.length) return '<tr><td colspan="4" class="table-score muted">No estimates recorded yet.</td></tr>';
 
   return rows.map((story) => {
@@ -944,6 +1019,7 @@ function normalizeImportedStory({ id = '', title = '', description = '', type = 
   return {
     id: String(id).trim(),
     type: String(type).trim() || 'Feature',
+    epicId: null,
     title: cleanTitle,
     description: String(description).trim() || 'A new story ready for the team to shape and estimate together.',
     acceptance: acceptanceItems.length ? acceptanceItems : ['Ready for discussion'],
@@ -1012,6 +1088,9 @@ function bindEvents() {
 
   document.querySelectorAll('[data-open-room]').forEach((button) => {
     button.addEventListener('click', () => selectRoom(button.dataset.openRoom));
+  });
+  document.querySelectorAll('[data-delete-room]').forEach((button) => {
+    button.addEventListener('click', () => deleteRoomRecord(button.dataset.deleteRoom));
   });
   document.querySelector('[data-create-room]')?.addEventListener('click', openCreateRoomModal);
   document.querySelector('[data-create-team]')?.addEventListener('click', openCreateTeamModal);
@@ -1089,6 +1168,18 @@ function bindEvents() {
   document.querySelector('[data-new-story]')?.addEventListener('click', openNewStoryModal);
   document.querySelector('[data-import-stories]')?.addEventListener('click', openImportModal);
   document.querySelector('[data-share]')?.addEventListener('click', shareRoom);
+  document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      theme = theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = theme;
+      try {
+        localStorage.setItem(THEME_KEY, theme);
+      } catch {
+        // Keep the selected theme for this page when storage is unavailable.
+      }
+      render();
+    });
+  });
   document.querySelector('[data-settings-sequence-select]')?.addEventListener('change', (event) => {
     state.sequence = event.target.value;
     saveState();
@@ -1149,6 +1240,7 @@ function makeEmptyRoomState() {
   empty.stories = [{
     id: 'ST-001',
     type: 'Feature',
+    epicId: null,
     title: 'First story to estimate',
     description: 'Add a story, then let the team estimate it together.',
     acceptance: ['Ready for discussion'],
@@ -1243,6 +1335,60 @@ async function selectRoom(roomId) {
   activeView = 'estimates';
   render();
   showToast(`${room.name} is ready`);
+}
+
+async function deleteRoomRecord(roomId) {
+  const room = cloud.rooms.find((candidate) => candidate.id === roomId);
+  if (!room || room.role !== 'owner') {
+    showToast('Only a room owner can remove a room');
+    return;
+  }
+  if (room.id === 'pi-24-commerce' || room.id === LOCAL_DEFAULT_ROOM_ID) {
+    showToast('The default room cannot be removed');
+    return;
+  }
+  if (!window.confirm(`Remove “${room.name}”? Its stories and estimates will be deleted.`)) return;
+
+  try {
+    if (siteRuntime.ready) {
+      await siteRequest(`/api/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' });
+    } else {
+      localWorkspace.rooms = localWorkspace.rooms.filter((candidate) => candidate.id !== roomId);
+      saveLocalWorkspace();
+    }
+
+    const pendingSave = siteRuntime.saveTimers.get(roomId);
+    if (pendingSave) {
+      clearTimeout(pendingSave);
+      siteRuntime.saveTimers.delete(roomId);
+    }
+
+    cloud.rooms = cloud.rooms.filter((candidate) => candidate.id !== roomId);
+    if (cloud.roomId === roomId) {
+      const fallback = cloud.rooms[0];
+      if (!fallback) throw new Error('No planning room is available');
+      if (siteRuntime.ready) {
+        await selectRoom(fallback.id);
+      } else {
+        activeRoomId = fallback.id;
+        cloud.roomId = fallback.id;
+        cloud.room = fallback;
+        cloud.memberCount = fallback.memberCount;
+        state = loadState(fallback.id);
+        localStorage.setItem(ROOM_ID_KEY, fallback.id);
+        updateRoomUrl(fallback.id);
+        activeView = 'rooms';
+        render();
+      }
+      localStorage.removeItem(`${STORAGE_KEY}-${roomId}`);
+    } else {
+      localStorage.removeItem(`${STORAGE_KEY}-${roomId}`);
+      render();
+    }
+    showToast(`${room.name} removed`);
+  } catch (error) {
+    showToast(error.message || 'Room could not be removed');
+  }
 }
 
 async function createRoomRecord(name, piLabel) {
@@ -1430,6 +1576,10 @@ function deleteStory(storyId) {
   }
   const index = state.stories.findIndex((story) => story.id === storyId);
   if (index < 0) return;
+  if (state.stories[index].type === 'Epic' && state.stories.some((story) => story.epicId === storyId)) {
+    showToast('Unlink the epic’s child stories before removing it');
+    return;
+  }
   const [removed] = state.stories.splice(index, 1);
   if (state.selectedStoryId === storyId) {
     state.selectedStoryId = state.stories[Math.min(index, state.stories.length - 1)].id;
@@ -1698,21 +1848,27 @@ function siteStatePayload() {
 function applySiteState(remoteState) {
   if (!remoteState || !Array.isArray(remoteState.stories) || !remoteState.stories.length) return false;
   const hasResourceModel = remoteState.resourceModelVersion === 1;
-  const stories = remoteState.stories.map((story) => ({
+  const normalizedStories = remoteState.stories.map((story) => ({
     ...story,
     id: String(story.id || '').trim(),
     type: String(story.type || 'Feature').trim() || 'Feature',
+    epicId: String(story.epicId || '').trim() || null,
     title: String(story.title || '').trim() || 'Untitled story',
     description: String(story.description || '').trim() || 'A new story ready for the team to shape and estimate together.',
     acceptance: Array.isArray(story.acceptance) && story.acceptance.length ? story.acceptance.map((item) => String(item)) : ['Ready for discussion'],
-    manual: normalizeEstimate(story.manual),
-    ai: normalizeEstimate(story.ai),
-    aiEnabled: story.aiEnabled === true || normalizeEstimate(story.ai) !== null,
+    manual: story.type === 'Epic' ? null : normalizeEstimate(story.manual),
+    ai: story.type === 'Epic' ? null : normalizeEstimate(story.ai),
+    aiEnabled: story.type !== 'Epic' && (story.aiEnabled === true || normalizeEstimate(story.ai) !== null),
     saved: story.saved === true,
-    serviceLinks: Array.isArray(story.serviceLinks) && (hasResourceModel || story.serviceLinks.length)
+    serviceLinks: story.type === 'Epic' ? [] : Array.isArray(story.serviceLinks) && (hasResourceModel || story.serviceLinks.length)
       ? normalizeServiceLinks(story.serviceLinks)
       : [],
   })).filter((story) => story.id && story.title);
+  const epicIds = new Set(normalizedStories.filter((story) => story.type === 'Epic').map((story) => story.id));
+  const stories = normalizedStories.map((story) => ({
+    ...story,
+    epicId: story.type === 'Epic' || !epicIds.has(story.epicId) ? null : story.epicId,
+  }));
   if (!stories.length) return false;
 
   const selectedStoryId = stories.some((story) => story.id === remoteState.selectedStoryId)
@@ -1995,6 +2151,10 @@ function updateCustomEstimate(input) {
 
 function saveAndNext() {
   const story = getSelectedStory();
+  if (story.type === 'Epic') {
+    showToast('Select a linked story to add an estimate');
+    return;
+  }
   if (story.manual === null) {
     showToast('Add the team estimate before moving on');
     return;
@@ -2021,6 +2181,7 @@ function openStoryEditorModal(storyId = null) {
     title: story?.title || '',
     description: story?.description || '',
     type: story?.type || 'Feature',
+    epicId: story?.epicId || '',
     acceptance: story?.acceptance?.join('\n') || 'Ready for discussion',
     serviceLinks: normalizeServiceLinks(story?.serviceLinks || []),
   };
@@ -2038,12 +2199,18 @@ function renderStoryEditorServices() {
   return `<div class="story-editor-services"><div class="modal-section-heading"><div><strong>Services</strong><span>Link the work to the teams delivering it.</span></div></div>${rows || '<p class="empty-manager">No services linked yet.</p>'}${available.length ? `<select class="modal-input editor-add-service" data-editor-add-service aria-label="Add service"><option value="">Add a service…</option>${available.map((service) => `<option value="${escapeHTML(service.id)}">${escapeHTML(service.name)}${getDomain(service.domainId) ? ` · ${escapeHTML(getDomain(service.domainId).name)}` : ''}</option>`).join('')}</select>` : state.services.length ? '<p class="modal-hint">All configured services are already linked.</p>' : '<p class="modal-hint">Add services from the Resources section first.</p>'}<p class="modal-hint">Use 100% across linked services. Any remainder stays unassigned.</p></div>`;
 }
 
+function renderStoryEditorEpic() {
+  if (storyEditorDraft.type === 'Epic') return '<p class="modal-hint epic-editor-note">Epics are roll-ups. Link estimable stories to this epic after creating it.</p>';
+  const epics = state.stories.filter((story) => story.type === 'Epic' && story.id !== storyEditorDraft.storyId);
+  return `<div class="modal-field"><label for="story-editor-epic">Epic <span class="field-optional">(optional)</span></label><select id="story-editor-epic" class="modal-input" data-editor-field="epicId"><option value="">No epic</option>${epics.map((epic) => `<option value="${escapeHTML(epic.id)}" ${epic.id === storyEditorDraft.epicId ? 'selected' : ''}>${escapeHTML(epic.title)}</option>`).join('')}</select>${epics.length ? '<p class="modal-hint">The epic dashboard rolls up this story’s team and AI points.</p>' : '<p class="modal-hint">Create an Epic story first to link this story.</p>'}</div>`;
+}
+
 function renderStoryEditorModal() {
   if (!storyEditorDraft) return;
   const isNew = storyEditorDraft.isNew;
-  const types = ['Feature', 'Improvement', 'Tech debt'];
+  const types = ['Feature', 'Improvement', 'Tech debt', 'Epic'];
   if (!types.includes(storyEditorDraft.type)) types.push(storyEditorDraft.type);
-  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal modal-wide story-editor-modal" role="dialog" aria-modal="true" aria-labelledby="story-editor-title"><div class="modal-header"><div><p class="section-kicker">${isNew ? 'Story queue' : 'Edit story'}</p><h2 id="story-editor-title">${isNew ? 'Add a story' : 'Edit story'}</h2><p>${isNew ? 'Capture the story and link it to the service that will deliver it.' : 'Update the story details and its service links before the next round.'}</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-story-editor-form><div class="story-editor-fields"><div class="modal-field"><label for="story-editor-title-input">Story title</label><input id="story-editor-title-input" class="modal-input" required maxlength="120" data-editor-field="title" value="${escapeHTML(storyEditorDraft.title)}" placeholder="e.g. Add audit history to project changes" /></div><div class="modal-field"><label for="story-editor-type">Type</label><select id="story-editor-type" class="modal-input" data-editor-field="type" aria-label="Story type">${types.map((type) => `<option value="${escapeHTML(type)}" ${type === storyEditorDraft.type ? 'selected' : ''}>${escapeHTML(type)}</option>`).join('')}</select></div></div><div class="modal-field"><label for="story-editor-description">Description <span class="field-optional">(optional)</span></label><textarea id="story-editor-description" class="modal-input" maxlength="280" data-editor-field="description" placeholder="As a… I want… so that…">${escapeHTML(storyEditorDraft.description)}</textarea></div><div class="modal-field"><label for="story-editor-acceptance">Acceptance criteria <span class="field-optional">(one per line)</span></label><textarea id="story-editor-acceptance" class="modal-input acceptance-editor" maxlength="500" data-editor-field="acceptance" placeholder="Ready for discussion">${escapeHTML(storyEditorDraft.acceptance)}</textarea></div>${renderStoryEditorServices()}<div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">${isNew ? 'Add story' : 'Save changes'} ${icon(isNew ? 'plus' : 'check')}</button></div></form></section></div>`;
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal modal-wide story-editor-modal" role="dialog" aria-modal="true" aria-labelledby="story-editor-title"><div class="modal-header"><div><p class="section-kicker">${isNew ? 'Story queue' : 'Edit story'}</p><h2 id="story-editor-title">${isNew ? 'Add a story' : 'Edit story'}</h2><p>${isNew ? 'Capture the story, choose an epic, and link it to the service that will deliver it.' : 'Update the story details, epic link, and service links before the next round.'}</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-story-editor-form><div class="story-editor-fields"><div class="modal-field"><label for="story-editor-title-input">Story title</label><input id="story-editor-title-input" class="modal-input" required maxlength="120" data-editor-field="title" value="${escapeHTML(storyEditorDraft.title)}" placeholder="e.g. Add audit history to project changes" /></div><div class="modal-field"><label for="story-editor-type">Type</label><select id="story-editor-type" class="modal-input" data-editor-field="type" aria-label="Story type">${types.map((type) => `<option value="${escapeHTML(type)}" ${type === storyEditorDraft.type ? 'selected' : ''}>${escapeHTML(type)}</option>`).join('')}</select></div></div><div class="modal-field"><label for="story-editor-description">Description <span class="field-optional">(optional)</span></label><textarea id="story-editor-description" class="modal-input" maxlength="280" data-editor-field="description" placeholder="As a… I want… so that…">${escapeHTML(storyEditorDraft.description)}</textarea></div><div class="modal-field"><label for="story-editor-acceptance">Acceptance criteria <span class="field-optional">(one per line)</span></label><textarea id="story-editor-acceptance" class="modal-input acceptance-editor" maxlength="500" data-editor-field="acceptance" placeholder="Ready for discussion">${escapeHTML(storyEditorDraft.acceptance)}</textarea></div>${renderStoryEditorEpic()}${storyEditorDraft.type === 'Epic' ? '<p class="modal-hint epic-editor-note">Services are assigned to the child stories; epic metrics stay focused on the linked estimate roll-up.</p>' : renderStoryEditorServices()}<div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">${isNew ? 'Add story' : 'Save changes'} ${icon(isNew ? 'plus' : 'check')}</button></div></form></section></div>`;
 
   const form = document.querySelector('[data-story-editor-form]');
   document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
@@ -2057,6 +2224,12 @@ function renderStoryEditorModal() {
   form.addEventListener('change', (event) => {
     const field = event.target.dataset.editorField;
     if (field) storyEditorDraft[field] = event.target.value;
+    if (field === 'type' && storyEditorDraft.type === 'Epic') {
+      storyEditorDraft.epicId = '';
+      storyEditorDraft.serviceLinks = [];
+      renderStoryEditorModal();
+      return;
+    }
     if (event.target.dataset.editorAddService !== undefined) {
       const serviceId = event.target.value;
       if (!serviceId) return;
@@ -2103,7 +2276,8 @@ function renderStoryEditorModal() {
     if (storyEditorDraft.isNew) {
       let storyNumber = 104 + state.stories.length;
       while (state.stories.some((story) => story.id === `PL-${storyNumber}`)) storyNumber += 1;
-      const story = { id: `PL-${storyNumber}`, type: storyEditorDraft.type, title, description: storyEditorDraft.description.trim() || 'A new story ready for the team to shape and estimate together.', acceptance: acceptance.length ? acceptance : ['Ready for discussion'], manual: null, ai: null, aiEnabled: false, saved: false, serviceLinks: normalizeServiceLinks(storyEditorDraft.serviceLinks) };
+      const epicId = storyEditorDraft.type === 'Epic' ? null : state.stories.some((candidate) => candidate.id === storyEditorDraft.epicId && candidate.type === 'Epic') ? storyEditorDraft.epicId : null;
+      const story = { id: `PL-${storyNumber}`, type: storyEditorDraft.type, epicId, title, description: storyEditorDraft.description.trim() || 'A new story ready for the team to shape and estimate together.', acceptance: acceptance.length ? acceptance : ['Ready for discussion'], manual: null, ai: null, aiEnabled: false, saved: false, serviceLinks: storyEditorDraft.type === 'Epic' ? [] : normalizeServiceLinks(storyEditorDraft.serviceLinks) };
       state.stories.push(story);
       state.selectedStoryId = story.id;
       showToast(`${story.id} added to the queue`);
@@ -2111,10 +2285,16 @@ function renderStoryEditorModal() {
       const story = state.stories.find((candidate) => candidate.id === storyEditorDraft.storyId);
       if (!story) return;
       story.type = storyEditorDraft.type;
+      story.epicId = storyEditorDraft.type === 'Epic' ? null : state.stories.some((candidate) => candidate.id === storyEditorDraft.epicId && candidate.type === 'Epic') ? storyEditorDraft.epicId : null;
       story.title = title;
       story.description = storyEditorDraft.description.trim() || 'A new story ready for the team to shape and estimate together.';
       story.acceptance = acceptance.length ? acceptance : ['Ready for discussion'];
-      story.serviceLinks = normalizeServiceLinks(storyEditorDraft.serviceLinks);
+      story.serviceLinks = storyEditorDraft.type === 'Epic' ? [] : normalizeServiceLinks(storyEditorDraft.serviceLinks);
+      if (story.type === 'Epic') {
+        story.manual = null;
+        story.ai = null;
+        story.aiEnabled = false;
+      }
       showToast(`${story.id} updated`);
     }
     saveState();

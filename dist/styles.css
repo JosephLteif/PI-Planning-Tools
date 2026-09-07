@@ -2805,6 +2805,321 @@ h1 {
   }
 }
 
+.room-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.danger-outline {
+  color: var(--coral);
+}
+
+.danger-outline:hover {
+  color: var(--coral);
+  border-color: var(--coral);
+  background: var(--coral-soft);
+}
+
+.epic-metrics {
+  margin-top: 18px;
+  padding: 18px;
+  background: var(--blue-soft);
+  border: 1px solid color-mix(in srgb, var(--blue) 25%, var(--line));
+  border-radius: var(--radius-md);
+}
+
+.epic-metrics-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.epic-metrics-heading h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.epic-metrics-heading p:not(.section-kicker) {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.epic-progress {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  color: var(--blue);
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.epic-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.epic-metric-grid > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.epic-metric-grid span,
+.epic-metric-grid small {
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.epic-metric-grid strong {
+  color: var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+}
+
+.epic-progress-bar {
+  height: 5px;
+  margin-top: 13px;
+  overflow: hidden;
+  background: var(--line);
+  border-radius: 5px;
+}
+
+.epic-progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--blue);
+  border-radius: inherit;
+}
+
+.epic-estimate-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 14px;
+  color: var(--ink-muted);
+  background: var(--canvas);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.epic-estimate-note svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.team-round-placeholder {
+  margin-top: 17px;
+}
+
+.epic-editor-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 0;
+}
+
+.score-pill.epic-pill {
+  min-width: 38px;
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --ink: #e8eef7;
+  --ink-muted: #a9b8cc;
+  --ink-soft: #8294ad;
+  --navy: #0b1423;
+  --navy-deep: #070f1b;
+  --line: #293c57;
+  --line-strong: #405773;
+  --surface: #14243a;
+  --canvas: #091321;
+  --coral-soft: #432b32;
+  --blue-soft: #193454;
+  --blue: #84adff;
+  --green: #6bd5a8;
+  --shadow: 0 16px 45px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+html[data-theme='dark'] .icon-button:hover,
+html[data-theme='dark'] .outline-button,
+html[data-theme='dark'] .profile-button,
+html[data-theme='dark'] .sequence-control select,
+html[data-theme='dark'] .story-detail,
+html[data-theme='dark'] .acceptance-chip,
+html[data-theme='dark'] .field-input,
+html[data-theme='dark'] .point-button,
+html[data-theme='dark'] .vote-card-back,
+html[data-theme='dark'] .vote-custom-input input,
+html[data-theme='dark'] .vote-results,
+html[data-theme='dark'] .mode-button:hover,
+html[data-theme='dark'] .mode-button.active,
+html[data-theme='dark'] .allocation-tab.active,
+html[data-theme='dark'] .story-service-select,
+html[data-theme='dark'] .add-service-select,
+html[data-theme='dark'] .manager-domain-select,
+html[data-theme='dark'] .allocation-input input,
+html[data-theme='dark'] .manager-row,
+html[data-theme='dark'] .modal,
+html[data-theme='dark'] .modal-input,
+html[data-theme='dark'] .file-drop,
+html[data-theme='dark'] .import-preview,
+html[data-theme='dark'] .room-card,
+html[data-theme='dark'] .empty-state,
+html[data-theme='dark'] .share-option,
+html[data-theme='dark'] .epic-metric-grid > div {
+  background: var(--surface);
+}
+
+html[data-theme='dark'] .story-detail,
+html[data-theme='dark'] .acceptance-chip,
+html[data-theme='dark'] .vote-card-back,
+html[data-theme='dark'] .vote-results,
+html[data-theme='dark'] .manager-row,
+html[data-theme='dark'] .modal,
+html[data-theme='dark'] .room-card,
+html[data-theme='dark'] .empty-state,
+html[data-theme='dark'] .share-option {
+  border-color: var(--line);
+}
+
+html[data-theme='dark'] .summary-icon,
+html[data-theme='dark'] .progress-bar,
+html[data-theme='dark'] .story-row:hover,
+html[data-theme='dark'] .story-action-button:hover:not(:disabled),
+html[data-theme='dark'] .story-number,
+html[data-theme='dark'] .score-pill,
+html[data-theme='dark'] .score-pill.empty,
+html[data-theme='dark'] .allocation-tabs,
+html[data-theme='dark'] .vote-mode-control,
+html[data-theme='dark'] .service-manager-column,
+html[data-theme='dark'] .import-tabs,
+html[data-theme='dark'] .team-list-row:hover,
+html[data-theme='dark'] .team-list-row.active {
+  background: #1b2d46;
+}
+
+html[data-theme='dark'] .story-row.active {
+  background: rgba(223, 240, 107, 0.12);
+  border-color: rgba(223, 240, 107, 0.3);
+}
+
+html[data-theme='dark'] .estimate-field.ai-field,
+html[data-theme='dark'] .vote-field.vote-ai-field {
+  background: #302b1d;
+  border-color: #6b5c36;
+}
+
+html[data-theme='dark'] .estimate-field.ai-field.is-disabled,
+html[data-theme='dark'] .vote-panel,
+html[data-theme='dark'] .vote-field,
+html[data-theme='dark'] .vote-results-summary div,
+html[data-theme='dark'] .allocation-breakdown,
+html[data-theme='dark'] .empty-allocation {
+  background: #102036;
+}
+
+html[data-theme='dark'] .vote-panel.is-revealed {
+  background: #1a332b;
+  border-color: #355c4c;
+}
+
+html[data-theme='dark'] .modal-input,
+html[data-theme='dark'] .sequence-control select,
+html[data-theme='dark'] .story-service-select,
+html[data-theme='dark'] .add-service-select,
+html[data-theme='dark'] .manager-domain-select,
+html[data-theme='dark'] .allocation-input input,
+html[data-theme='dark'] .field-input,
+html[data-theme='dark'] .point-button,
+html[data-theme='dark'] .vote-custom-input input {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+html[data-theme='dark'] .story-type {
+  color: #ffae94;
+}
+
+html[data-theme='dark'] .acceptance-chip {
+  color: var(--ink-muted);
+}
+
+html[data-theme='dark'] .ai-field .point-button.selected,
+html[data-theme='dark'] .score-pill.ai {
+  color: #f7d98b;
+  background: #5a4822;
+  border-color: #886c2f;
+}
+
+html[data-theme='dark'] .score-pill.manual {
+  color: #14243a;
+}
+
+html[data-theme='dark'] .toggle {
+  background: #40516a;
+}
+
+html[data-theme='dark'] .toggle::after {
+  background: #edf3fb;
+}
+
+html[data-theme='dark'] .vote-panel-footer,
+html[data-theme='dark'] .story-services,
+html[data-theme='dark'] .team-actions,
+html[data-theme='dark'] .member-row,
+html[data-theme='dark'] .settings-detail-list > div,
+html[data-theme='dark'] .history-table td {
+  border-color: var(--line);
+}
+
+html[data-theme='dark'] .file-drop:hover,
+html[data-theme='dark'] .share-option:hover {
+  background: #1b2d46;
+}
+
+html[data-theme='dark'] .modal-backdrop {
+  background: rgba(2, 8, 16, 0.72);
+}
+
+html[data-theme='dark'] .epic-metrics {
+  background: #122c4a;
+  border-color: #315580;
+}
+
+@media (max-width: 640px) {
+  .epic-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .room-card-actions {
+    justify-content: flex-start;
+  }
+}
+
 .management-content {
   margin-top: 54px;
 }

@@ -15,6 +15,13 @@
       "when": 1788781709636,
       "tag": "0001_overconfident_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788785999429,
+      "tag": "0002_conscious_maelstrom",
+      "breakpoints": true
     }
   ]
 }

@@ -83,6 +83,7 @@ export const stories = sqliteTable('stories', {
   roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
   storyKey: text('story_key').notNull(),
   type: text('type').notNull(),
+  epicId: text('epic_id'),
   title: text('title').notNull(),
   description: text('description').notNull(),
   acceptanceJson: text('acceptance_json').notNull(),
@@ -94,6 +95,7 @@ export const stories = sqliteTable('stories', {
 }, (table) => ({
   storiesPk: primaryKey({ columns: [table.roomId, table.storyKey] }),
   storiesOrderIdx: index('stories_order_idx').on(table.roomId, table.sortOrder),
+  storiesEpicIdx: index('stories_epic_idx').on(table.roomId, table.epicId),
 }));
 
 export const storyServiceAllocations = sqliteTable('story_service_allocations', {
