@@ -184,7 +184,7 @@ function normalizeCapacity(source, roster = []) {
     name: cleanText(member?.name, 'Planner', 120),
     office: member?.office === 'cyprus' ? 'cyprus' : 'beirut',
     trainStaffDevCapacityPct: percent(member?.trainStaffDevCapacityPct, 0.75),
-  })).filter((member) => member.id) : [];
+  })).filter((member) => member.id && (!roster.length || roster.some((candidate) => cleanId(candidate?.id) === member.id))) : [];
   const knownIds = new Set(members.map((member) => member.id));
   roster.forEach((member) => {
     const id = cleanId(member?.id);
