@@ -1437,7 +1437,7 @@ async function refreshWorkspaceData() {
     cloud.teams = Array.isArray(teamsPayload.teams) ? teamsPayload.teams.map(normalizeTeamRecord) : [];
     cloud.adminUsers = Array.isArray(adminPayload.users) ? adminPayload.users : [];
     cloud.selectedTeamId = cloud.teams.some((team) => team.id === cloud.selectedTeamId) ? cloud.selectedTeamId : cloud.teams[0]?.id || null;
-    render();
+    if (!hasActiveEditor()) render();
   } catch (error) {
     console.warn('Pointline workspace refresh failed', error);
   }
