@@ -420,7 +420,7 @@ function requireAdmin(user) {
 
 async function readAdminUsers(db) {
   const result = await db.prepare(`SELECT id, username, email, display_name, role, disabled, created_at, last_login_at
-    FROM accounts WHERE username IS NOT NULL ORDER BY role DESC, username`).all();
+    FROM accounts ORDER BY role DESC, username, display_name`).all();
   return rows(result).map((account) => ({
     ...accountUser(account),
     disabled: account.disabled === 1,
