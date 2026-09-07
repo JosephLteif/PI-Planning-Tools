@@ -761,19 +761,28 @@ function renderVotePlayers(players, revealValues) {
     const name = player.name || (player.id === getVoteIdentity() ? 'You' : `Player ${index + 1}`);
     const hasVoted = player.hasVoted === true || player.manual !== null || player.ai !== null;
     const value = revealValues ? formatScore(player.manual) : hasVoted ? 'Hidden' : '—';
-    return `<div class="vote-player-row"><span class="vote-player-avatar">${escapeHTML(getInitials(name))}</span><span class="vote-player-copy"><strong>${escapeHTML(name)}${player.role === 'owner' ? ' <span class="role-badge">Owner</span>' : ''}</strong><small class="${hasVoted ? 'is-voted' : 'is-waiting'}">${hasVoted ? 'Voted' : 'Waiting'}</small></span><span class="vote-player-value ${hasVoted ? '' : 'is-waiting'}">${escapeHTML(value)}</span></div>`;
+    const values = revealValues
+      ? `<span class="vote-player-values"><span class="vote-player-estimate"><small>Manual</small><strong>${formatScore(player.manual)}</strong></span><span class="vote-player-estimate ai"><small>AI</small><strong>${formatScore(player.ai)}</strong></span></span>`
+      : `<span class="vote-player-value ${hasVoted ? '' : 'is-waiting'}">${escapeHTML(value)}</span>`;
+    return `<div class="vote-player-row ${revealValues ? 'has-both-estimates' : ''}"><span class="vote-player-avatar">${escapeHTML(getInitials(name))}</span><span class="vote-player-copy"><strong>${escapeHTML(name)}${player.role === 'owner' ? ' <span class="role-badge">Owner</span>' : ''}</strong><small class="${hasVoted ? 'is-voted' : 'is-waiting'}">${hasVoted ? 'Voted' : 'Waiting'}</small></span>${values}</div>`;
   }).join('')}</div>`;
+}
+
+function getRoundAiAverage(entries = getRoundVotes()) {
+  const values = entries.map((vote) => vote.ai).filter((value) => value !== null);
+  return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
 }
 
 function renderVoteResults(entries) {
   const manualVotes = entries.map((vote) => vote.manual).filter((value) => value !== null);
   const average = getRoundManualAverage(entries);
+  const aiAverage = getRoundAiAverage(entries);
   const nearestValue = getNearestSequenceValue(average);
   const minimum = manualVotes.length ? Math.min(...manualVotes) : null;
   const maximum = manualVotes.length ? Math.max(...manualVotes) : null;
   const spread = minimum === null ? null : maximum - minimum;
   const currentEstimate = getSelectedStory()?.manual;
-  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Average</span><strong>${formatScore(average)}</strong></div><div><span>Nearest card</span><strong>${formatScore(nearestValue)}</strong></div><div><span>Spread</span><strong>${formatScore(spread)}</strong></div></div>${renderVotePlayers(getRoundPlayers(), true)}<div class="vote-result-actions">${nearestValue === null ? '' : `<button class="outline-button compact-button" type="button" data-apply-round-average>${icon('check')}Use ${formatScore(nearestValue)} as team estimate</button>`}<label class="vote-override"><span>Override final vote</span><input type="number" min="0" step="0.5" value="${currentEstimate === null || currentEstimate === undefined ? '' : escapeHTML(currentEstimate)}" placeholder="—" data-round-override aria-label="Override final team vote" /></label><button class="primary-button compact-button" type="button" data-apply-round-override>Apply override</button></div><p class="vote-result-note">Use the nearest card for the normal team estimate, or enter an override when the room agrees on another value. AI votes remain a comparison.</p></div>`;
+  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Manual average</span><strong>${formatScore(average)}</strong></div><div><span>AI average</span><strong>${formatScore(aiAverage)}</strong></div><div><span>Nearest manual card</span><strong>${formatScore(nearestValue)}</strong></div><div><span>Manual spread</span><strong>${formatScore(spread)}</strong></div></div>${renderVotePlayers(getRoundPlayers(), true)}<div class="vote-result-actions">${nearestValue === null ? '' : `<button class="outline-button compact-button" type="button" data-apply-round-average>${icon('check')}Use ${formatScore(nearestValue)} as team estimate</button>`}<label class="vote-override"><span>Override final vote</span><input type="number" min="0" step="0.5" value="${currentEstimate === null || currentEstimate === undefined ? '' : escapeHTML(currentEstimate)}" placeholder="—" data-round-override aria-label="Override final team vote" /></label><button class="primary-button compact-button" type="button" data-apply-round-override>Apply override</button></div><p class="vote-result-note">Use the nearest manual card for the team estimate, or enter an override when the room agrees on another value. AI votes remain a comparison.</p></div>`;
 }
 
 function renderVotePanel(story) {

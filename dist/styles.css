@@ -2158,6 +2158,10 @@ h1 {
   border-radius: 7px;
 }
 
+.vote-player-row.has-both-estimates {
+  grid-template-columns: 27px minmax(0, 1fr) minmax(112px, auto);
+}
+
 .vote-player-avatar {
   display: grid;
   width: 27px;
@@ -2207,6 +2211,37 @@ h1 {
   color: var(--ink-soft);
   font-family: inherit;
   font-size: 10px;
+}
+
+.vote-player-values {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.vote-player-estimate {
+  display: grid;
+  min-width: 34px;
+  gap: 2px;
+  text-align: right;
+}
+
+.vote-player-estimate small {
+  color: var(--ink-soft);
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.vote-player-estimate strong {
+  color: var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+}
+
+.vote-player-estimate.ai strong {
+  color: #b58119;
 }
 
 .role-badge {
@@ -2425,7 +2460,7 @@ h1 {
 
 .vote-results-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -3471,7 +3506,16 @@ h1 {
   }
 
   .vote-results-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 5px;
+  }
+
+  .vote-player-row.has-both-estimates {
+    grid-template-columns: 27px minmax(0, 1fr) auto;
+  }
+
+  .vote-player-values {
+    gap: 8px;
   }
 
   .vote-result-actions {
