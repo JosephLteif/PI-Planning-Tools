@@ -228,10 +228,13 @@ const siteRuntime = {
   ready: false,
   pollTimer: null,
   saveTimers: new Map(),
+  saveChains: new Map(),
   saveInFlight: 0,
   stateRevision: 0,
   syncedRevision: 0,
   revisionRoomId: cloud.roomId,
+  serverStateVersion: 0,
+  baseState: null,
   refreshing: false,
 };
 
@@ -379,6 +382,8 @@ function resetSiteSyncForRoom(roomId) {
   siteRuntime.revisionRoomId = roomId;
   siteRuntime.stateRevision = 0;
   siteRuntime.syncedRevision = 0;
+  siteRuntime.serverStateVersion = 0;
+  siteRuntime.baseState = null;
 }
 
 function persistLocalState() {
@@ -1445,12 +1450,13 @@ async function selectRoom(roomId) {
   if (siteRuntime.ready) {
     try {
       const payload = await siteRequest(`/api/state?room=${encodeURIComponent(roomId)}`);
-      if (!applySiteState(payload.state)) throw new Error('This room has no stories yet');
       activeRoomId = roomId;
       cloud.roomId = roomId;
       cloud.room = normalizeRoomRecord(payload.room || room);
       cloud.memberCount = Math.max(1, Number(payload.memberCount) || room.memberCount);
       resetSiteSyncForRoom(roomId);
+      if (!applySiteState(payload.state)) throw new Error('This room has no stories yet');
+      rememberRemoteSiteState(payload);
       updateRoomUrl(roomId);
       activeView = 'estimates';
       render();
@@ -1541,6 +1547,7 @@ async function createRoomRecord(name, piLabel) {
     activeRoomId = room.id;
     resetSiteSyncForRoom(room.id);
     applySiteState(payload.state);
+    rememberRemoteSiteState(payload);
     updateRoomUrl(room.id);
     activeView = 'estimates';
     render();
@@ -2103,7 +2110,60 @@ function getVoteIdentity() {
 function siteStatePayload() {
   const snapshot = JSON.parse(JSON.stringify(state));
   snapshot.round = { ...snapshot.round, votes: {} };
+  snapshot.stateVersion = siteRuntime.serverStateVersion;
   return snapshot;
+}
+
+function rememberRemoteSiteState(payload) {
+  if (!payload?.state || !Array.isArray(payload.state.stories)) return;
+  siteRuntime.serverStateVersion = Number(payload.room?.stateVersion) || 0;
+  siteRuntime.baseState = structuredClone(payload.state);
+}
+
+function statesEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeStateCollection(baseItems, localItems, remoteItems) {
+  const base = new Map((Array.isArray(baseItems) ? baseItems : []).map((item) => [item.id, item]));
+  const local = new Map((Array.isArray(localItems) ? localItems : []).map((item) => [item.id, item]));
+  const remote = new Map((Array.isArray(remoteItems) ? remoteItems : []).map((item) => [item.id, item]));
+  const localOrder = Array.isArray(localItems) ? localItems.map((item) => item.id) : [];
+  const remoteOrder = Array.isArray(remoteItems) ? remoteItems.map((item) => item.id) : [];
+  const baseOrder = Array.isArray(baseItems) ? baseItems.map((item) => item.id) : [];
+  const localOrderChanged = JSON.stringify(localOrder) !== JSON.stringify(baseOrder);
+  const ids = [];
+  const appendIds = (items) => items.forEach((id) => {
+    if (!ids.includes(id)) ids.push(id);
+  });
+  appendIds(localOrderChanged ? localOrder : remoteOrder);
+  appendIds(localOrderChanged ? remoteOrder : localOrder);
+
+  return ids.map((id) => {
+    const baseItem = base.get(id);
+    const localItem = local.get(id);
+    const remoteItem = remote.get(id);
+    if (!baseItem) return localItem || remoteItem;
+    if (!localItem && !remoteItem) return null;
+    if (!localItem) return statesEqual(remoteItem, baseItem) ? null : remoteItem;
+    if (!remoteItem) return statesEqual(localItem, baseItem) ? null : localItem;
+    if (statesEqual(localItem, baseItem)) return remoteItem;
+    return localItem;
+  }).filter(Boolean);
+}
+
+function mergeConcurrentState(baseState, localState, remoteState) {
+  const base = baseState || {};
+  const local = localState || {};
+  const remote = remoteState || {};
+  const merged = structuredClone(remote);
+  merged.stories = mergeStateCollection(base.stories, local.stories, remote.stories);
+  merged.domains = mergeStateCollection(base.domains, local.domains, remote.domains);
+  merged.services = mergeStateCollection(base.services, local.services, remote.services);
+  ['sequence', 'selectedStoryId', 'round'].forEach((key) => {
+    if (!statesEqual(local[key], base[key])) merged[key] = structuredClone(local[key]);
+  });
+  return merged;
 }
 
 function applySiteState(remoteState) {
@@ -2166,7 +2226,10 @@ async function refreshSiteState({ renderAfter = true } = {}) {
     const payload = await siteRequest(`/api/state${roomId}`);
     cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
     if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
-    if (applySiteState(payload.state)) persistLocalState();
+    if (applySiteState(payload.state)) {
+      rememberRemoteSiteState(payload);
+      persistLocalState();
+    }
     cloud.status = 'synced';
     if (renderAfter) render();
     else updateCloudStatusBadge();
@@ -2183,6 +2246,7 @@ async function refreshSiteState({ renderAfter = true } = {}) {
 function siteStateHasPendingChanges() {
   return Boolean(
     siteRuntime.saveTimers.has(cloud.roomId) ||
+    siteRuntime.saveChains.has(cloud.roomId) ||
     siteRuntime.saveInFlight > 0 ||
     (siteRuntime.revisionRoomId === cloud.roomId && siteRuntime.stateRevision > siteRuntime.syncedRevision),
   );
@@ -2194,35 +2258,64 @@ function queueSiteCloudSync() {
   if (!roomId) return;
   const existingTimer = siteRuntime.saveTimers.get(roomId);
   if (existingTimer) clearTimeout(existingTimer);
-  const revision = siteRuntime.stateRevision;
-  const shouldRefreshAfterReveal = state.round.phase === 'revealed';
-  const payload = JSON.stringify(siteStatePayload());
-  const timer = window.setTimeout(async () => {
+  const timer = window.setTimeout(() => {
     siteRuntime.saveTimers.delete(roomId);
-    siteRuntime.saveInFlight += 1;
-    try {
-      await siteRequest(roomScopedApiPath('/api/state', roomId), { method: 'PUT', body: payload });
-      if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
-        siteRuntime.syncedRevision = Math.max(siteRuntime.syncedRevision, revision);
-        cloud.status = 'synced';
-        updateCloudStatusBadge();
-        if (shouldRefreshAfterReveal) window.setTimeout(() => refreshSiteState(), 0);
+    const revision = siteRuntime.stateRevision;
+    const shouldRefreshAfterReveal = state.round.phase === 'revealed';
+    const payload = JSON.stringify(siteStatePayload());
+    const priorSave = siteRuntime.saveChains.get(roomId) || Promise.resolve();
+    const save = priorSave.catch(() => {}).then(async () => {
+      siteRuntime.saveInFlight += 1;
+      try {
+        const saved = await siteRequest(roomScopedApiPath('/api/state', roomId), { method: 'PUT', body: payload });
+        if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
+          siteRuntime.syncedRevision = Math.max(siteRuntime.syncedRevision, revision);
+          rememberRemoteSiteState(saved);
+          cloud.status = 'synced';
+          updateCloudStatusBadge();
+          if (shouldRefreshAfterReveal) window.setTimeout(() => refreshSiteState(), 0);
+        }
+      } catch (error) {
+        if (error.status === 409) {
+          try {
+            const latest = await siteRequest(roomScopedApiPath('/api/state', roomId));
+            if (latest.state && siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
+              const localState = siteRuntime.stateRevision > revision ? state : JSON.parse(payload);
+              state = mergeConcurrentState(siteRuntime.baseState, localState, latest.state);
+              rememberRemoteSiteState(latest);
+              siteRuntime.stateRevision += 1;
+              persistLocalState();
+              render();
+              cloud.status = 'synced';
+              updateCloudStatusBadge();
+              queueSiteCloudSync();
+              return;
+            }
+          } catch (mergeError) {
+            console.warn('Pointline Site state merge failed', mergeError);
+          }
+        }
+        if (handleSessionExpired(error)) return;
+        if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
+          cloud.status = error.status === 401 ? 'auth' : 'error';
+          updateCloudStatusBadge();
+        }
+        console.warn('Pointline Site state save failed', error);
+        if (error.status !== 401 && siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId && siteRuntime.stateRevision >= revision) {
+          window.setTimeout(() => {
+            if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) queueSiteCloudSync();
+          }, 1000);
+        }
+      } finally {
+        siteRuntime.saveInFlight -= 1;
       }
-    } catch (error) {
-      if (handleSessionExpired(error)) return;
-      if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
-        cloud.status = error.status === 401 ? 'auth' : 'error';
-        updateCloudStatusBadge();
-      }
-      console.warn('Pointline Site state save failed', error);
-      if (error.status !== 401 && siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId && siteRuntime.stateRevision >= revision) {
-        window.setTimeout(() => {
-          if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) queueSiteCloudSync();
-        }, 1000);
-      }
-    } finally {
-      siteRuntime.saveInFlight -= 1;
-    }
+    });
+    siteRuntime.saveChains.set(roomId, save);
+    save.then(() => {
+      if (siteRuntime.saveChains.get(roomId) === save) siteRuntime.saveChains.delete(roomId);
+    }, () => {
+      if (siteRuntime.saveChains.get(roomId) === save) siteRuntime.saveChains.delete(roomId);
+    });
   }, 250);
   siteRuntime.saveTimers.set(roomId, timer);
 }
@@ -2312,8 +2405,10 @@ async function loadAuthenticatedSiteSession() {
     const payload = await siteRequest(`/api/state${roomId}`);
     cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
     if (!applySiteState(payload.state)) {
-      await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      const saved = await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      rememberRemoteSiteState(saved);
     } else {
+      rememberRemoteSiteState(payload);
       persistLocalState();
     }
     siteRuntime.syncedRevision = siteRuntime.stateRevision;

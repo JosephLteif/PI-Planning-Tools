@@ -32,6 +32,7 @@ export const rooms = sqliteTable('rooms', {
   name: text('name').notNull(),
   piLabel: text('pi_label').notNull(),
   ownerAccountId: text('owner_account_id').references(() => accounts.id, { onDelete: 'set null' }),
+  stateVersion: integer('state_version').notNull().default(0),
   sequenceKey: text('sequence_key').notNull().default('fibonacci'),
   selectedStoryKey: text('selected_story_key'),
   voteMode: text('vote_mode').notNull().default('hidden'),

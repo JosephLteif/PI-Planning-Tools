@@ -416,7 +416,7 @@ async function requireTeamMember(db, teamId, userId) {
 }
 
 async function readRoomState(db, roomId, userId) {
-  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode
+  const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
 
@@ -549,6 +549,7 @@ async function readRoomState(db, roomId, userId) {
       id: room.id,
       name: room.name,
       piLabel: room.pi_label,
+      stateVersion: Number(room.state_version) || 0,
       role: room.owner_account_id === userId ? 'owner' : 'member',
     },
     state: stories.length
@@ -654,14 +655,39 @@ async function saveRoomState(db, roomId, input) {
     throw error;
   }
 
+  const room = await db.prepare('SELECT state_version FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  if (!room) {
+    const error = new Error('Room not found');
+    error.status = 404;
+    throw error;
+  }
+  const currentVersion = Number(room.state_version) || 0;
+  const requestedVersion = Number.isInteger(Number(input?.stateVersion)) && Number(input.stateVersion) >= 0
+    ? Number(input.stateVersion)
+    : currentVersion;
+  if (requestedVersion !== currentVersion) {
+    const error = new Error('This room changed elsewhere. Your latest changes will be merged and retried.');
+    error.status = 409;
+    throw error;
+  }
+
   const now = new Date().toISOString();
+  const reservation = await db.prepare(`UPDATE rooms
+    SET state_version = state_version + 1, sequence_key = ?, selected_story_key = ?, vote_mode = ?, updated_at = ?
+    WHERE id = ? AND state_version = ?`)
+    .bind(source.sequence, source.selectedStoryId, source.round.mode, now, roomId, currentVersion)
+    .run();
+  if (Number(reservation?.meta?.changes) !== 1) {
+    const error = new Error('This room changed elsewhere. Your latest changes will be merged and retried.');
+    error.status = 409;
+    throw error;
+  }
+
   const storyIds = source.stories.map((story) => story.id);
   const serviceIds = source.services.map((service) => service.id);
   const domainIds = source.domains.map((domain) => domain.id);
   const placeholders = (items) => items.length ? items.map(() => '?').join(', ') : '';
   const statements = [
-    db.prepare(`UPDATE rooms SET sequence_key = ?, selected_story_key = ?, vote_mode = ?, updated_at = ? WHERE id = ?`)
-      .bind(source.sequence, source.selectedStoryId, source.round.mode, now, roomId),
     ...(domainIds.length
       ? [db.prepare(`DELETE FROM domains WHERE room_id = ? AND id NOT IN (${placeholders(domainIds)})`).bind(roomId, ...domainIds)]
       : [db.prepare('DELETE FROM domains WHERE room_id = ?').bind(roomId)]),
