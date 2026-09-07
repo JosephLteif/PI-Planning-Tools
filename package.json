@@ -8,6 +8,7 @@
   },
   "devDependencies": {
     "drizzle-kit": "0.31.4",
-    "drizzle-orm": "0.44.5"
+    "drizzle-orm": "0.44.5",
+    "lucide": "^1.42.0"
   }
 }

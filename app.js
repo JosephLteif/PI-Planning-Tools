@@ -392,7 +392,16 @@ function escapeHTML(value) {
     .replaceAll("'", '&#039;');
 }
 
+const lucideIconNames = {
+  board: 'layout-grid', users: 'users', settings: 'settings', plus: 'plus', chevron: 'chevron-right',
+  chevronDown: 'chevron-down', chevronUp: 'chevron-up', edit: 'pencil', trash: 'trash-2', share: 'share-2',
+  link: 'link', bell: 'bell', sun: 'sun', moon: 'moon', check: 'check', sparkle: 'sparkles',
+  refresh: 'refresh-cw', clock: 'clock', info: 'info', note: 'file-text', upload: 'upload', x: 'x',
+  lock: 'lock', eye: 'eye', flip: 'refresh-cw', layers: 'layers', cloud: 'cloud', play: 'play',
+};
+
 function icon(name, className = '') {
+  /* Legacy icon paths retained only as a migration note; Lucide renders the active icons below.
   const icons = {
     board: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     users: '<path d="M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20"/><circle cx="10" cy="8" r="3"/><path d="M16 11a3 3 0 1 0-1-5.8M16.5 15.1A3.5 3.5 0 0 1 20 18.5V20"/>',
@@ -422,10 +431,17 @@ function icon(name, className = '') {
     layers: '<path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/>',
     cloud: '<path d="M7.5 18h9a4.5 4.5 0 0 0 .8-8.9A5.5 5.5 0 0 0 6.7 8.3 4 4 0 0 0 7.5 18Z"/>',
     play: '<path d="m8 5 11 7-11 7V5Z"/>',
-  };
+  }; */
 
-  return `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ''}</svg>`;
+  return `<i class="${className} icon" data-lucide="${lucideIconNames[name] || name}" aria-hidden="true"></i>`;
 }
+
+function hydrateIcons() {
+  window.lucide?.createIcons({ attrs: { 'stroke-width': '1.8' } });
+}
+
+const iconObserver = new MutationObserver(hydrateIcons);
+iconObserver.observe(document.body, { childList: true, subtree: true });
 
 function getSelectedStory() {
   return state.stories.find((story) => story.id === state.selectedStoryId) || state.stories[0];
@@ -756,13 +772,18 @@ function renderTeamPage() {
 
 function renderSettingsPage() {
   const room = getCurrentRoom();
+  const selectedStory = getSelectedStory();
   return `<section class="page-intro">
-    <div><p class="eyebrow">Workspace · room settings</p><h1>${escapeHTML(room.name)}</h1><p class="page-intro-copy">Tune the room vocabulary and share access without leaving the planning workspace.</p></div>
+    <div><p class="eyebrow">Workspace · room settings</p><h1>${escapeHTML(room.name)}</h1><p class="page-intro-copy">Set the room’s point sequence and run the shared estimation round here.</p></div>
     <button class="outline-button" type="button" data-share>${icon('share')}Invite people</button>
   </section>
   <section class="settings-layout">
     <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Room identity</p><h2>Room details</h2></div></div><div class="settings-detail-list"><div><span>Name</span><strong>${escapeHTML(room.name)}</strong></div><div><span>Increment</span><strong>${escapeHTML(room.piLabel)}</strong></div><div><span>People with access</span><strong>${cloud.memberCount}</strong></div><div><span>Your role</span><strong>${room.role === 'owner' ? 'Room owner' : 'Team member'}</strong></div></div></section>
     <section class="card settings-card"><div class="section-heading"><div><p class="section-kicker">Estimation rules</p><h2>Point sequence</h2></div></div><p class="settings-copy">Everyone sees the same card values when a round starts. Existing estimates stay attached to their stories.</p><label class="sequence-control settings-sequence">Point sequence<select id="settings-sequence-select" data-settings-sequence-select aria-label="Point sequence">${Object.entries(sequences).map(([key, sequence]) => `<option value="${key}" ${key === state.sequence ? 'selected' : ''}>${sequence.label}</option>`).join('')}</select></label><div class="guide-points settings-points">${sequences[state.sequence].values.map((value) => `<span class="guide-point">${formatScore(value)}</span>`).join('')}</div></section>
+  </section>
+  <section class="card settings-round-card" aria-label="Room estimation round">
+    <div class="team-round-card-heading"><div><p class="section-kicker">Room-level activity</p><h2>Team round</h2><p>Start, reveal, and reset the shared vote for the selected story. These controls apply to the whole room.</p></div><span class="settings-round-story">${icon('note')}${escapeHTML(selectedStory?.title || 'No story selected')}</span></div>
+    ${selectedStory?.type === 'Epic' ? '<div class="epic-estimate-note team-round-placeholder">Select a linked story in Estimates before starting a team round.</div>' : renderVotePanel(selectedStory)}
   </section>`;
 }
 
@@ -805,7 +826,7 @@ function render() {
       ${renderRoomSelector()}
 
       <nav class="sidebar-nav" aria-label="Workspace navigation">
-        <button class="nav-link active" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${state.stories.length}</span></button>
+        <button class="nav-link active" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${estimableStories.length}</span></button>
         <button class="nav-link" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
         <button class="nav-link" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
         <button class="nav-link" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${cloud.rooms.length || 1}</span></button>
@@ -843,7 +864,7 @@ function render() {
         <section class="summary-grid" aria-label="Room summary">
           <article class="summary-card">
             <div class="summary-top"><span class="summary-label">Stories estimated</span><span class="summary-icon">${icon('board')}</span></div>
-            <div class="summary-value">${estimatedCount}<small>/ ${state.stories.length}</small></div>
+            <div class="summary-value">${estimatedCount}<small>/ ${estimableStories.length}</small></div>
             <div class="progress-bar" aria-label="${progress}% estimated"><span style="width: ${progress}%"></span></div>
           </article>
           <article class="summary-card">
@@ -888,22 +909,17 @@ function render() {
 
             <div class="estimator-footer">
               <div class="status-message">${selectedStory.saved ? `${icon('check')} Saved to the room` : `${icon('clock')} Not estimated yet`}</div>
-              <div class="footer-actions"><button class="outline-button" type="button" data-reset>${icon('refresh')}Clear</button><button class="primary-button" type="button" data-save-next>Save &amp; next ${icon('chevron')}</button></div>
+              <div class="footer-actions"><button class="outline-button" type="button" data-reset>${icon('refresh')}Clear</button><button class="primary-button" type="button" data-save-next>Next ${icon('chevron')}</button></div>
             </div>
             </section>` : `<div class="epic-estimate-note">${icon('layers')} This epic is a roll-up. Select one of its linked stories in the queue to record an estimate.</div>`}
           </section>
 
           <aside class="card queue-card" aria-label="Story queue">
             <div class="queue-header"><div><h2>Story queue</h2><p>Pick a story to estimate</p></div><div class="queue-header-actions"><button class="outline-button import-button" type="button" data-import-stories="true" onclick="openImportModal()">${icon('upload')}Import</button><button class="icon-button" type="button" data-new-story aria-label="Add a new story">${icon('plus')}</button></div></div>
-            <div class="story-list">${state.stories.map((story, index) => renderStoryRow(story, index)).join('')}</div>
+            ${renderStoryQueueGroups()}
             <div class="queue-footer">${icon('clock')} ${estimableStories.length - estimatedCount} stories still need a team estimate</div>
           </aside>
         </div>
-
-        <section class="card team-round-card" aria-label="Team round">
-          <div class="team-round-card-heading"><div><p class="section-kicker">Room-level activity</p><h2>Team round</h2><p>Run the shared vote for the current story. Point sequence and room defaults live in Room settings.</p></div><button class="outline-button compact-button" type="button" data-nav="settings">${icon('settings')}Room settings</button></div>
-          ${selectedStory.type === 'Epic' ? '<div class="epic-estimate-note team-round-placeholder">Select a linked story to start the team round.</div>' : renderVotePanel(selectedStory)}
-        </section>
 
         <div class="lower-grid lower-grid-single">
           <section class="card history-card">
@@ -930,18 +946,18 @@ function renderEstimateField(type, story) {
   const disabled = isAI && story.aiEnabled !== true;
   const active = disabled ? null : score;
 
-  return `<div class="estimate-field ${isAI ? 'ai-field' : ''} ${disabled ? 'is-disabled' : ''}">
+  return `<div class="estimate-field ${isAI ? 'ai-field' : ''} ${disabled ? 'is-disabled' : ''} ${!isAI && score !== null ? 'has-selection' : ''}">
     <div class="field-label-row">
       <div class="field-label-copy">${icon(isAI ? 'sparkle' : 'users')}<strong>${isAI ? 'AI-assisted estimate' : 'Your estimate'}</strong></div>
       ${isAI ? `<label class="toggle-wrap"><input type="checkbox" data-ai-toggle ${!disabled ? 'checked' : ''} /><span class="toggle"></span>${disabled ? 'Add optional' : 'Optional on'}</label>` : '<span class="story-type">team-owned</span>'}
     </div>
     <p class="field-helper">${isAI ? (disabled ? 'Turn this on when you want to record a second opinion for the same story.' : 'Enter the point value from your AI-assisted read of this story.') : 'The team’s shared point of view. This is the estimate that drives planning.'}</p>
-    <div class="point-options" aria-label="${isAI ? 'AI-assisted' : 'Manual'} point options">${sequenceValues.map((value) => `<button class="point-button ${active === value ? 'selected' : ''}" type="button" data-estimate-type="${type}" data-estimate-value="${value}" ${disabled ? 'disabled' : ''}>${formatScore(value)}</button>`).join('')}</div>
+    <div class="point-options" aria-label="${isAI ? 'AI-assisted' : 'Manual'} point options">${sequenceValues.map((value) => `<button class="point-button ${active === value ? 'selected' : ''}" type="button" data-estimate-type="${type}" data-estimate-value="${value}" aria-pressed="${active === value}" ${disabled ? 'disabled' : ''}>${formatScore(value)}</button>`).join('')}</div>
     <div class="field-bottom-row"><span class="custom-label">Custom value</span><input class="field-input" type="number" min="0" step="0.5" value="${active === null ? '' : escapeHTML(active)}" placeholder="—" data-custom-type="${type}" aria-label="Custom ${isAI ? 'AI-assisted' : 'manual'} estimate" ${disabled ? 'disabled' : ''} /></div>
   </div>`;
 }
 
-function renderStoryRow(story, index) {
+function renderStoryRow(story, index, queueStories = state.stories) {
   const epic = getEpicForStory(story);
   const status = story.type === 'Epic' ? 'Epic · roll-up' : story.manual !== null ? 'Estimated' : 'Needs estimate';
   const parentLabel = story.type !== 'Epic' && epic ? ` · ${epic.title}` : '';
@@ -954,11 +970,39 @@ function renderStoryRow(story, index) {
     </button>
     <span class="story-row-actions" aria-label="Actions for ${escapeHTML(story.title)}">
       <button class="story-action-button" type="button" data-move-story="up" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} up" ${index === 0 ? 'disabled' : ''}>${icon('chevronUp')}</button>
-      <button class="story-action-button" type="button" data-move-story="down" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} down" ${index === state.stories.length - 1 ? 'disabled' : ''}>${icon('chevronDown')}</button>
+      <button class="story-action-button" type="button" data-move-story="down" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} down" ${index === queueStories.length - 1 ? 'disabled' : ''}>${icon('chevronDown')}</button>
       <button class="story-action-button" type="button" data-edit-story="${escapeHTML(story.id)}" aria-label="Edit ${escapeHTML(story.title)}">${icon('edit')}</button>
       <button class="story-action-button danger-action" type="button" data-delete-story="${escapeHTML(story.id)}" aria-label="Remove ${escapeHTML(story.title)}" ${canDelete ? '' : 'disabled'}>${icon('trash')}</button>
     </span>
   </div>`;
+}
+
+function getStoryQueueGroups() {
+  const epics = state.stories.filter((story) => story.type === 'Epic');
+  if (!epics.length) return [{ id: 'all', title: 'All stories', epic: null, stories: state.stories }];
+
+  const groups = epics.map((epic) => ({
+    id: epic.id,
+    title: epic.title,
+    epic,
+    stories: state.stories.filter((story) => story.type !== 'Epic' && getEpicForStory(story)?.id === epic.id),
+  }));
+  const unlinked = state.stories.filter((story) => story.type !== 'Epic' && !getEpicForStory(story));
+  if (unlinked.length) groups.push({ id: 'unlinked', title: 'Unlinked stories', epic: null, stories: unlinked });
+  return groups;
+}
+
+function renderStoryQueueGroups() {
+  const groups = getStoryQueueGroups();
+  const epics = state.stories.filter((story) => story.type === 'Epic');
+  return `<div class="story-queues">${groups.map((group) => {
+    const storyCount = group.epic ? group.stories.length : group.stories.filter((story) => story.type !== 'Epic').length;
+    const estimatedCount = group.stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length;
+    const rows = group.epic
+      ? `${renderStoryRow(group.epic, epics.indexOf(group.epic), epics)}${group.stories.map((story, index) => renderStoryRow(story, index, group.stories)).join('')}`
+      : group.stories.map((story, index) => renderStoryRow(story, index, group.stories)).join('');
+    return `<section class="story-queue-group"><div class="story-queue-group-heading"><div><span class="queue-group-icon">${icon(group.epic ? 'layers' : 'board')}</span><span><strong>${escapeHTML(group.epic ? 'Epic queue' : group.title)}</strong><small>${group.epic ? escapeHTML(group.title) : `${storyCount} ${storyCount === 1 ? 'story' : 'stories'}`}</small></span></div><span class="queue-group-count">${estimatedCount}/${storyCount}</span></div><div class="story-list">${rows || '<p class="empty-manager">No stories in this queue yet.</p>'}</div></section>`;
+  }).join('')}</div>`;
 }
 
 function renderHistoryRows() {
@@ -1182,7 +1226,7 @@ function bindEvents() {
       const story = getSelectedStory();
       const type = button.dataset.estimateType;
       story[type] = normalizeEstimate(button.dataset.estimateValue);
-      story.saved = false;
+      if (type === 'manual') story.saved = story.manual !== null;
       if (type === 'ai') story.aiEnabled = true;
       saveState();
       render();
@@ -1619,10 +1663,17 @@ function selectStory(storyId) {
 }
 
 function moveStory(storyId, direction) {
-  const index = state.stories.findIndex((story) => story.id === storyId);
+  const story = state.stories.find((candidate) => candidate.id === storyId);
+  if (!story) return;
+  const queueStories = story.type === 'Epic'
+    ? state.stories.filter((candidate) => candidate.type === 'Epic')
+    : state.stories.filter((candidate) => candidate.type !== 'Epic' && getEpicForStory(candidate)?.id === getEpicForStory(story)?.id);
+  const index = queueStories.findIndex((candidate) => candidate.id === storyId);
   const nextIndex = direction === 'up' ? index - 1 : index + 1;
-  if (index < 0 || nextIndex < 0 || nextIndex >= state.stories.length) return;
-  [state.stories[index], state.stories[nextIndex]] = [state.stories[nextIndex], state.stories[index]];
+  if (index < 0 || nextIndex < 0 || nextIndex >= queueStories.length) return;
+  const currentStateIndex = state.stories.findIndex((candidate) => candidate.id === queueStories[index].id);
+  const nextStateIndex = state.stories.findIndex((candidate) => candidate.id === queueStories[nextIndex].id);
+  [state.stories[currentStateIndex], state.stories[nextStateIndex]] = [state.stories[nextStateIndex], state.stories[currentStateIndex]];
   saveState();
   render();
 }
@@ -1731,7 +1782,7 @@ function applyRoundAverage() {
     return;
   }
   story.manual = nearestValue;
-  story.saved = false;
+  story.saved = true;
   saveState();
   render();
   showToast(`Nearest card value ${formatScore(nearestValue)} applied — choose another value to override it`);
@@ -2252,7 +2303,7 @@ function updateCustomEstimate(input) {
   }
 
   story[type] = estimate;
-  story.saved = false;
+  if (type === 'manual') story.saved = estimate !== null;
   if (type === 'ai' && estimate !== null) story.aiEnabled = true;
   saveState();
   render();
@@ -2269,12 +2320,14 @@ function saveAndNext() {
     return;
   }
 
-  story.saved = true;
-  const nextStory = state.stories.find((candidate) => candidate.manual === null);
+  const estimableStories = state.stories.filter((candidate) => candidate.type !== 'Epic');
+  const currentIndex = estimableStories.findIndex((candidate) => candidate.id === story.id);
+  const nextStory = estimableStories.slice(currentIndex + 1).find((candidate) => candidate.manual === null)
+    || estimableStories.find((candidate) => candidate.manual === null && candidate.id !== story.id);
   state.selectedStoryId = nextStory ? nextStory.id : story.id;
   saveState();
   render();
-  showToast(nextStory ? `${story.id} saved — next story is ready` : 'All stories have a team estimate');
+  showToast(nextStory ? `Next story: ${nextStory.id}` : 'All stories have a team estimate');
 }
 
 function openNewStoryModal() {
