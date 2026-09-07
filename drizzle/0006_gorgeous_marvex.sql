@@ -1,0 +1,1 @@
+ALTER TABLE `planning_rounds` ADD `timer_ends_at` text;

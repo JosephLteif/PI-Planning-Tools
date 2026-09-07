@@ -140,6 +140,12 @@ function cleanId(value, fallback = '') {
   return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(id) ? id : fallback;
 }
 
+function cleanTimer(value) {
+  const timer = cleanText(value, '', 80);
+  if (!timer || !Number.isFinite(Date.parse(timer))) return null;
+  return new Date(timer).toISOString();
+}
+
 function makeId(prefix) {
   return `${prefix}-${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;
 }
@@ -212,6 +218,8 @@ function normalizeStateInput(input) {
   const roundNumber = Number.isInteger(roundSource.roundNumber) && roundSource.roundNumber > 0
     ? roundSource.roundNumber
     : 1;
+  const roundMode = roundSource.mode === 'open' ? 'open' : 'hidden';
+  const hideVoteCountUntilComplete = roundMode === 'hidden' && roundSource.hideVoteCountUntilComplete === true;
 
   return {
     sequence: ALLOWED_SEQUENCES.has(source.sequence) ? source.sequence : 'fibonacci',
@@ -221,10 +229,13 @@ function normalizeStateInput(input) {
     stories,
     round: {
       phase: ALLOWED_PHASES.has(roundSource.phase) ? roundSource.phase : 'idle',
-      mode: roundSource.mode === 'open' ? 'open' : 'hidden',
+      mode: roundMode,
+      storageMode: hideVoteCountUntilComplete ? 'hidden-count' : roundMode,
+      hideVoteCountUntilComplete,
       storyId: roundStoryId,
       roundNumber,
-      revealedAt: roundSource.revealedAt ? cleanText(roundSource.revealedAt, '', 80) : null,
+      revealedAt: roundSource.revealedAt ? cleanTimer(roundSource.revealedAt) : null,
+      timerEndsAt: cleanTimer(roundSource.timerEndsAt),
     },
   };
 }
@@ -427,6 +438,12 @@ async function requireRoomManager(db, roomId, user) {
   if (room.owner_account_id !== user.id) throw authError('Only the room owner can manage room members', 403);
 }
 
+async function canManageRoom(db, roomId, user) {
+  if (user?.role === 'admin') return true;
+  const room = await db.prepare('SELECT owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  return room?.owner_account_id === user?.id;
+}
+
 async function readDirectoryUsers(db) {
   const result = await db.prepare(`SELECT id, username, email, display_name, role
     FROM accounts WHERE disabled = 0 AND username IS NOT NULL ORDER BY display_name, username`).all();
@@ -472,7 +489,7 @@ async function readRoomState(db, roomId, userId) {
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
 
-  const [domainResult, serviceResult, storyResult, allocationResult, memberResult, voteHistoryResult] = await Promise.all([
+  const [domainResult, serviceResult, storyResult, allocationResult, memberResult, voteHistoryResult, memberRosterResult] = await Promise.all([
     db.prepare('SELECT id, name, sort_order FROM domains WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare('SELECT id, name, domain_id, sort_order FROM services WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare(`SELECT story_key, type, epic_id, title, description, acceptance_json, sort_order,
@@ -489,6 +506,9 @@ async function readRoomState(db, roomId, userId) {
       WHERE v.room_id = ? AND (pr.phase = 'revealed' OR pr.mode = 'open')
         AND (v.manual_estimate IS NOT NULL OR v.ai_estimate IS NOT NULL)
       ORDER BY v.story_key, v.round_number, v.updated_at, v.account_id`).bind(roomId).all(),
+    db.prepare(`SELECT rm.account_id, rm.role, a.display_name, a.email
+      FROM room_members rm LEFT JOIN accounts a ON a.id = rm.account_id
+      WHERE rm.room_id = ? ORDER BY rm.role DESC, a.display_name, a.email`).bind(roomId).all(),
   ]);
 
   const domains = rows(domainResult).map((domain) => ({ id: domain.id, name: domain.name }));
@@ -530,7 +550,7 @@ async function readRoomState(db, roomId, userId) {
     : stories[0]?.id || null;
   let currentRound = null;
   if (selectedStoryId) {
-    currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at
+    currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at
       FROM planning_rounds WHERE room_id = ? AND story_key = ?
       ORDER BY round_number DESC LIMIT 1`).bind(roomId, selectedStoryId).first();
   }
@@ -539,22 +559,26 @@ async function readRoomState(db, roomId, userId) {
     ? {
       phase: ALLOWED_PHASES.has(currentRound.phase) ? currentRound.phase : 'idle',
       mode: currentRound.mode === 'open' ? 'open' : 'hidden',
+      hideVoteCountUntilComplete: currentRound.mode === 'hidden-count',
       storyId: currentRound.story_key,
       roundNumber: Number(currentRound.round_number) || 1,
       submittedCount: 0,
       votes: {},
       cardFlipped: false,
       revealedAt: currentRound.revealed_at || null,
+      timerEndsAt: currentRound.timer_ends_at || null,
     }
     : {
       phase: 'idle',
       mode: room.vote_mode === 'open' ? 'open' : 'hidden',
+      hideVoteCountUntilComplete: room.vote_mode === 'hidden-count',
       storyId: selectedStoryId,
       roundNumber: 1,
       submittedCount: 0,
       votes: {},
       cardFlipped: false,
       revealedAt: null,
+      timerEndsAt: null,
     };
 
   if (currentRound) {
@@ -564,24 +588,46 @@ async function readRoomState(db, roomId, userId) {
       .first();
     round.submittedCount = Number(countRow?.count) || 0;
 
-    const voteResult = round.phase === 'revealed' || round.mode === 'open'
-      ? await db.prepare(`SELECT v.account_id, v.manual_estimate, v.ai_estimate, v.ai_enabled,
-          a.display_name, a.email
-        FROM votes v LEFT JOIN accounts a ON a.id = v.account_id
-        WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?
-        ORDER BY v.updated_at, v.account_id`).bind(roomId, round.storyId, round.roundNumber).all()
-      : await db.prepare(`SELECT v.account_id, v.manual_estimate, v.ai_estimate, v.ai_enabled,
-          a.display_name, a.email
-        FROM votes v LEFT JOIN accounts a ON a.id = v.account_id
-        WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ? AND v.account_id = ?`)
-        .bind(roomId, round.storyId, round.roundNumber, userId)
-        .all();
-    round.votes = Object.fromEntries(rows(voteResult).map((vote) => [vote.account_id, {
-      name: vote.display_name || vote.email?.split('@')[0] || 'Planner',
-      manual: parseScore(vote.manual_estimate),
-      ai: parseScore(vote.ai_estimate),
-      aiEnabled: vote.ai_enabled === 1,
-    }]));
+    const voteResult = await db.prepare(`SELECT v.account_id, v.manual_estimate, v.ai_estimate, v.ai_enabled,
+        a.display_name, a.email
+      FROM votes v LEFT JOIN accounts a ON a.id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?
+      ORDER BY v.updated_at, v.account_id`).bind(roomId, round.storyId, round.roundNumber).all();
+    const voteRows = rows(voteResult);
+    const canSeeAllVotes = round.phase === 'revealed' || round.mode === 'open';
+    const voteByPlayer = new Map(voteRows.map((vote) => [vote.account_id, vote]));
+    round.votes = Object.fromEntries(voteRows
+      .filter((vote) => canSeeAllVotes || vote.account_id === userId)
+      .map((vote) => [vote.account_id, {
+        name: vote.display_name || vote.email?.split('@')[0] || 'Planner',
+        manual: parseScore(vote.manual_estimate),
+        ai: parseScore(vote.ai_estimate),
+        aiEnabled: vote.ai_enabled === 1,
+      }]));
+    round.players = rows(memberRosterResult).map((member) => {
+      const vote = voteByPlayer.get(member.account_id);
+      const manual = parseScore(vote?.manual_estimate);
+      const ai = parseScore(vote?.ai_estimate);
+      return {
+        id: member.account_id,
+        name: member.display_name || member.email?.split('@')[0] || 'Planner',
+        role: member.role === 'owner' ? 'owner' : 'member',
+        hasVoted: manual !== null || ai !== null,
+        manual: canSeeAllVotes || member.account_id === userId ? manual : null,
+        ai: canSeeAllVotes || member.account_id === userId ? ai : null,
+        aiEnabled: vote?.ai_enabled === 1,
+      };
+    });
+  } else {
+    round.players = rows(memberRosterResult).map((member) => ({
+      id: member.account_id,
+      name: member.display_name || member.email?.split('@')[0] || 'Planner',
+      role: member.role === 'owner' ? 'owner' : 'member',
+      hasVoted: false,
+      manual: null,
+      ai: null,
+      aiEnabled: false,
+    }));
   }
 
   const voteHistory = rows(voteHistoryResult).map((vote) => ({
@@ -744,7 +790,7 @@ async function runBatches(db, statements) {
   }
 }
 
-async function saveRoomState(db, roomId, input) {
+async function saveRoomState(db, roomId, input, user) {
   const source = normalizeStateInput(input);
   if (!source.stories.length) {
     const error = new Error('At least one story is required');
@@ -773,11 +819,27 @@ async function saveRoomState(db, roomId, input) {
     throw error;
   }
 
+  const currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at
+    FROM planning_rounds WHERE room_id = ? AND story_key = ? ORDER BY round_number DESC LIMIT 1`)
+    .bind(roomId, source.round.storyId)
+    .first();
+  const roundChanged = currentRound
+    ? currentRound.story_key !== source.round.storyId
+      || Number(currentRound.round_number) !== source.round.roundNumber
+      || currentRound.phase !== source.round.phase
+      || currentRound.mode !== source.round.storageMode
+      || (currentRound.revealed_at || null) !== (source.round.revealedAt || null)
+      || (currentRound.timer_ends_at || null) !== (source.round.timerEndsAt || null)
+    : source.round.phase !== 'idle' || source.round.timerEndsAt !== null;
+  if (roundChanged && !(await canManageRoom(db, roomId, user))) {
+    throw authError('Only the room owner or an admin can manage the voting round', 403);
+  }
+
   const now = new Date().toISOString();
   const reservation = await db.prepare(`UPDATE rooms
     SET state_version = state_version + 1, sequence_key = ?, selected_story_key = ?, vote_mode = ?, updated_at = ?
     WHERE id = ? AND state_version = ?`)
-    .bind(source.sequence, source.selectedStoryId, source.round.mode, now, roomId, currentVersion)
+    .bind(source.sequence, source.selectedStoryId, source.round.storageMode, now, roomId, currentVersion)
     .run();
   if (Number(reservation?.meta?.changes) !== 1) {
     const error = new Error('This room changed elsewhere. Your latest changes will be merged and retried.');
@@ -836,11 +898,11 @@ async function saveRoomState(db, roomId, input) {
 
   if (source.round.storyId) {
     statements.push(db.prepare(`INSERT INTO planning_rounds
-      (room_id, story_key, round_number, phase, mode, submitted_count, revealed_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+      (room_id, story_key, round_number, phase, mode, submitted_count, revealed_at, timer_ends_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
       ON CONFLICT(room_id, story_key, round_number) DO UPDATE SET phase = excluded.phase,
-        mode = excluded.mode, revealed_at = excluded.revealed_at, updated_at = excluded.updated_at`)
-      .bind(roomId, source.round.storyId, source.round.roundNumber, source.round.phase, source.round.mode, source.round.revealedAt, now));
+        mode = excluded.mode, revealed_at = excluded.revealed_at, timer_ends_at = excluded.timer_ends_at, updated_at = excluded.updated_at`)
+      .bind(roomId, source.round.storyId, source.round.roundNumber, source.round.phase, source.round.storageMode, source.round.revealedAt, source.round.timerEndsAt, now));
   }
 
   await runBatches(db, statements);
@@ -865,7 +927,7 @@ async function createRoom(db, user, input) {
       VALUES (?, ?, 'owner', ?)`)
       .bind(roomId, user.id, now),
   ]);
-  await saveRoomState(db, roomId, input?.state || {});
+  await saveRoomState(db, roomId, input?.state || {}, user);
   return readRoomState(db, roomId, user.id);
 }
 
@@ -1094,7 +1156,7 @@ async function handleApi(request, env) {
     });
   }
   if (url.pathname === '/api/state' && request.method === 'PUT') {
-    await saveRoomState(env.DB, roomId, await readJson(request));
+    await saveRoomState(env.DB, roomId, await readJson(request), user);
     const room = await readRoomState(env.DB, roomId, user.id);
     await publishRoomState(env.DB, roomId);
     return json({ ok: true, roomId, ...room });
@@ -1135,6 +1197,9 @@ async function handleApi(request, env) {
     return json({ ok: true, submittedCount: Number(count?.count) || 0 });
   }
   if (url.pathname === '/api/votes' && request.method === 'DELETE') {
+    if (!(await canManageRoom(env.DB, roomId, user))) {
+      throw authError('Only the room owner or an admin can clear votes', 403);
+    }
     const input = await readJson(request);
     const storyId = cleanId(input.storyId);
     const roundNumber = Number(input.roundNumber);

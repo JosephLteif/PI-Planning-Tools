@@ -150,12 +150,15 @@ const defaultState = {
   round: {
     phase: 'idle',
     mode: 'hidden',
+    hideVoteCountUntilComplete: false,
     storyId: 'PL-104',
     roundNumber: 1,
     submittedCount: 0,
     votes: {},
     cardFlipped: false,
     revealedAt: null,
+    timerEndsAt: null,
+    players: [],
   },
 };
 
@@ -258,12 +261,15 @@ function makeRound(storyId, mode = 'hidden', roundNumber = 1) {
   return {
     phase: 'idle',
     mode: mode === 'open' ? 'open' : 'hidden',
+    hideVoteCountUntilComplete: false,
     storyId,
     roundNumber,
     submittedCount: 0,
     votes: {},
     cardFlipped: false,
     revealedAt: null,
+    timerEndsAt: null,
+    players: [],
   };
 }
 
@@ -314,6 +320,9 @@ function normalizeRound(round, storyId) {
     votes,
     cardFlipped: source.cardFlipped === true,
     revealedAt: source.revealedAt || null,
+    hideVoteCountUntilComplete: source.hideVoteCountUntilComplete === true,
+    timerEndsAt: source.timerEndsAt || null,
+    players: Array.isArray(source.players) ? source.players : [],
   };
 }
 
@@ -523,6 +532,10 @@ function isAdmin() {
   return cloud.user?.role === 'admin';
 }
 
+function canModerateRoom() {
+  return isAdmin() || getCurrentRoom()?.role === 'owner' || getCurrentRoom()?.role === 'admin';
+}
+
 function getInitials(name) {
   return String(name)
     .split(/\s+/)
@@ -540,6 +553,38 @@ function getRoundVotes() {
 
 function getRoundVoteCount() {
   return Math.max(getRoundVotes().length, state.round.submittedCount || 0);
+}
+
+function getRoundPlayers() {
+  if (Array.isArray(state.round.players) && state.round.players.length) return state.round.players;
+  return [{ id: getVoteIdentity(), name: getUserName(), role: 'owner', hasVoted: getRoundVotes().length > 0, manual: getOwnVote().manual, ai: getOwnVote().ai, aiEnabled: getOwnVote().aiEnabled }];
+}
+
+function everyoneVoted() {
+  const players = getRoundPlayers();
+  return players.length > 0 && players.every((player) => player.hasVoted === true);
+}
+
+function getRemainingRoundSeconds() {
+  if (!state.round.timerEndsAt) return null;
+  return Math.max(0, Math.ceil((Date.parse(state.round.timerEndsAt) - Date.now()) / 1000));
+}
+
+function formatRoundTimer(seconds) {
+  if (seconds === null) return 'No timer';
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+let roundTimerTicker = null;
+
+function ensureRoundTimerTicker() {
+  if (roundTimerTicker) return;
+  roundTimerTicker = window.setInterval(() => {
+    const element = document.querySelector('[data-round-timer]');
+    if (element) element.textContent = formatRoundTimer(getRemainingRoundSeconds());
+  }, 1000);
 }
 
 function getOwnVote() {
@@ -678,7 +723,16 @@ function renderVoteField(type, vote) {
   const disabled = isAI && vote.aiEnabled !== true;
   const active = disabled ? null : vote[type];
   const options = sequences[state.sequence].values.map((value) => `<button class="point-button ${active === value ? 'selected' : ''}" type="button" data-vote-type="${type}" data-vote-value="${value}" ${disabled ? 'disabled' : ''}>${formatScore(value)}</button>`).join('');
-  return `<div class="vote-field ${isAI ? 'vote-ai-field' : ''} ${disabled ? 'is-disabled' : ''}"><div class="vote-field-label"><strong>${isAI ? `${icon('sparkle')}AI lens` : `${icon('users')}Your manual vote`}</strong>${isAI ? `<label class="toggle-wrap"><input type="checkbox" data-vote-ai-toggle ${disabled ? '' : 'checked'} /><span class="toggle"></span>${disabled ? 'Optional' : 'On'}</label>` : '<span class="vote-field-note">Hidden until reveal</span>'}</div><div class="point-options">${options}</div><label class="vote-custom-input"><span>Custom</span><input type="number" min="0" step="0.5" value="${active === null ? '' : escapeHTML(active)}" placeholder="—" data-vote-custom="${type}" aria-label="Custom ${isAI ? 'AI' : 'manual'} vote" ${disabled ? 'disabled' : ''} /></label></div>`;
+  return `<section class="vote-field ${isAI ? 'vote-ai-field' : ''} ${disabled ? 'is-disabled' : ''}" aria-label="${isAI ? 'AI estimation' : 'Normal estimation'}"><div class="vote-field-label"><div><p class="vote-choice-kicker">${isAI ? 'AI estimation' : 'Normal estimation'}</p><strong>${isAI ? `${icon('sparkle')}AI second opinion` : `${icon('users')}Your team vote`}</strong></div>${isAI ? `<label class="toggle-wrap"><input type="checkbox" data-vote-ai-toggle ${disabled ? '' : 'checked'} /><span class="toggle"></span>${disabled ? 'Add optional' : 'On'}</label>` : '<span class="vote-field-note">Private until reveal</span>'}</div><p class="vote-choice-helper">${isAI ? (disabled ? 'Turn this on to add an optional AI-assisted perspective.' : 'Add a second opinion without changing the team vote.') : 'Choose the number that best represents the team’s estimate.'}</p><div class="point-options vote-point-options">${options}</div><label class="vote-custom-input"><span>Custom value</span><input type="number" min="0" step="0.5" value="${active === null ? '' : escapeHTML(active)}" placeholder="—" data-vote-custom="${type}" aria-label="Custom ${isAI ? 'AI' : 'manual'} vote" ${disabled ? 'disabled' : ''} /></label></section>`;
+}
+
+function renderVotePlayers(players, revealValues) {
+  return `<div class="vote-player-list" aria-label="Room players">${players.map((player, index) => {
+    const name = player.name || (player.id === getVoteIdentity() ? 'You' : `Player ${index + 1}`);
+    const hasVoted = player.hasVoted === true || player.manual !== null || player.ai !== null;
+    const value = revealValues ? formatScore(player.manual) : hasVoted ? 'Hidden' : '—';
+    return `<div class="vote-player-row"><span class="vote-player-avatar">${escapeHTML(getInitials(name))}</span><span class="vote-player-copy"><strong>${escapeHTML(name)}${player.role === 'owner' ? ' <span class="role-badge">Owner</span>' : ''}</strong><small class="${hasVoted ? 'is-voted' : 'is-waiting'}">${hasVoted ? 'Voted' : 'Waiting'}</small></span><span class="vote-player-value ${hasVoted ? '' : 'is-waiting'}">${escapeHTML(value)}</span></div>`;
+  }).join('')}</div>`;
 }
 
 function renderVoteResults(entries) {
@@ -688,27 +742,34 @@ function renderVoteResults(entries) {
   const minimum = manualVotes.length ? Math.min(...manualVotes) : null;
   const maximum = manualVotes.length ? Math.max(...manualVotes) : null;
   const spread = minimum === null ? null : maximum - minimum;
-  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Average</span><strong>${formatScore(average)}</strong></div><div><span>Nearest card</span><strong>${formatScore(nearestValue)}</strong></div><div><span>Spread</span><strong>${formatScore(spread)}</strong></div></div><div class="vote-result-list">${entries.map((vote, index) => `<div class="vote-result-row"><span>${escapeHTML(vote.name || (vote.id === (cloud.user?.id || participantId) ? 'You' : `Voter ${index + 1}`))}</span><span class="score-pill manual">${formatScore(vote.manual)}</span><span class="score-pill ai">${formatScore(vote.ai)}</span></div>`).join('')}</div>${nearestValue === null ? '' : `<div class="vote-result-actions"><button class="outline-button compact-button" type="button" data-apply-round-average>${icon('check')}Use ${formatScore(nearestValue)} as team estimate</button></div>`}<p class="vote-result-note">Use the nearest card to fill the team estimate, or choose another value in the final estimate fields above to override it. AI votes are shown only as a comparison.</p></div>`;
+  const currentEstimate = getSelectedStory()?.manual;
+  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Average</span><strong>${formatScore(average)}</strong></div><div><span>Nearest card</span><strong>${formatScore(nearestValue)}</strong></div><div><span>Spread</span><strong>${formatScore(spread)}</strong></div></div>${renderVotePlayers(getRoundPlayers(), true)}<div class="vote-result-actions">${nearestValue === null ? '' : `<button class="outline-button compact-button" type="button" data-apply-round-average>${icon('check')}Use ${formatScore(nearestValue)} as team estimate</button>`}<label class="vote-override"><span>Override final vote</span><input type="number" min="0" step="0.5" value="${currentEstimate === null || currentEstimate === undefined ? '' : escapeHTML(currentEstimate)}" placeholder="—" data-round-override aria-label="Override final team vote" /></label><button class="primary-button compact-button" type="button" data-apply-round-override>Apply override</button></div><p class="vote-result-note">Use the nearest card for the normal team estimate, or enter an override when the room agrees on another value. AI votes remain a comparison.</p></div>`;
 }
 
 function renderVotePanel(story) {
   const round = state.round;
   const entries = getRoundVotes();
   const ownVote = getOwnVote();
-  const visibleEntries = round.mode === 'open' || round.phase === 'revealed' ? entries : [];
-  const modeButtons = `<div class="vote-mode-control" role="group" aria-label="Voting visibility"><button class="mode-button ${round.mode === 'hidden' ? 'active' : ''}" type="button" data-vote-mode="hidden">${icon('lock')}Hidden</button><button class="mode-button ${round.mode === 'open' ? 'active' : ''}" type="button" data-vote-mode="open">${icon('eye')}Open</button></div>`;
+  const players = getRoundPlayers();
+  const moderator = canModerateRoom();
+  const isRevealed = round.phase === 'revealed';
+  const allVoted = everyoneVoted();
+  const canSeeValues = round.mode === 'open' || isRevealed;
+  const countVisible = canSeeValues || round.hideVoteCountUntilComplete !== true || allVoted;
+  const modeButtons = moderator ? `<div class="vote-mode-control" role="group" aria-label="Voting visibility"><button class="mode-button ${round.mode === 'hidden' ? 'active' : ''}" type="button" data-vote-mode="hidden">${icon('lock')}Hidden</button><button class="mode-button ${round.mode === 'open' ? 'active' : ''}" type="button" data-vote-mode="open">${icon('eye')}Open</button></div><label class="vote-count-setting"><input type="checkbox" data-hide-vote-count ${round.hideVoteCountUntilComplete ? 'checked' : ''} />Hide count until all vote</label>` : `<span class="vote-visibility-badge">${icon(round.mode === 'hidden' ? 'lock' : 'eye')}${round.mode === 'hidden' ? 'Hidden votes' : 'Open votes'}</span>`;
 
   if (round.phase === 'idle') {
-    return `<div class="vote-panel"><div class="vote-panel-heading"><div><p class="section-kicker">Round ready</p><h3>Estimate without anchoring</h3><p>Start a round so everyone can choose a card at the same time. Hidden mode keeps values private until anyone reveals the room.</p></div>${modeButtons}</div><div class="vote-panel-footer"><span class="vote-status">${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${round.mode === 'hidden' ? 'Votes stay face down until reveal' : 'Votes are visible as they arrive'}</span><button class="primary-button" type="button" data-start-voting>${icon('play')}Start ${round.mode === 'hidden' ? 'hidden' : 'open'} round</button></div></div>`;
+    return `<div class="vote-panel"><div class="vote-panel-heading"><div><p class="section-kicker">Round ready</p><h3>Estimate without anchoring</h3><p>Start a round so everyone can choose a number card at the same time. Hidden mode keeps values private until the moderator reveals the votes.</p></div>${modeButtons}</div><div class="vote-panel-footer"><span class="vote-status">${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${moderator ? 'Moderator controls the round' : 'Waiting for the moderator to start'}</span>${moderator ? `<button class="primary-button" type="button" data-start-voting>${icon('play')}Start ${round.mode === 'hidden' ? 'hidden' : 'open'} round</button>` : ''}</div></div>`;
   }
 
-  const isRevealed = round.phase === 'revealed';
   const voteCount = getRoundVoteCount();
-  const canReveal = voteCount > 0;
+  const voteSummary = countVisible ? `${voteCount}/${players.length} voted` : 'Waiting for everyone to vote';
   const voteStatus = isRevealed
-    ? `${icon('check')} Votes revealed · ${voteCount} ${voteCount === 1 ? 'vote' : 'votes'}`
-    : `${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${voteCount} ${voteCount === 1 ? 'vote' : 'votes'} in · ${round.mode === 'hidden' ? 'values hidden' : 'live results'}`;
-  return `<div class="vote-panel ${isRevealed ? 'is-revealed' : ''}"><div class="vote-panel-heading"><div><p class="section-kicker">${isRevealed ? 'Round result' : 'Voting in progress'}</p><h3>${isRevealed ? 'Compare the room' : 'Choose your card'}</h3><p>${isRevealed ? 'The room can now compare perspectives and agree a final estimate.' : 'Flip your card, choose a manual value, and optionally add an AI second opinion. Anyone in the room can reveal all cards once a vote is in.'}</p></div>${modeButtons}</div>${isRevealed ? renderVoteResults(entries) : `<div class="vote-card ${round.cardFlipped ? 'is-flipped' : ''}" data-vote-card><div class="vote-card-inner"><div class="vote-card-face vote-card-front"><span class="vote-card-lock">${icon(round.mode === 'hidden' ? 'lock' : 'eye')}</span><strong>${round.mode === 'hidden' ? 'Your vote is private' : 'Open voting'}</strong><span>${round.mode === 'hidden' ? 'Flip the card when you are ready to vote.' : 'Choose a value and the room can see it.'}</span></div><div class="vote-card-face vote-card-back"><div class="vote-fields">${renderVoteField('manual', ownVote)}${renderVoteField('ai', ownVote)}</div></div></div></div>`}<div class="vote-panel-footer"><span class="vote-status">${voteStatus}</span><div class="vote-actions">${!isRevealed ? `<button class="outline-button" type="button" data-flip-card aria-pressed="${round.cardFlipped}">${icon('flip')}Flip card</button>` : ''}${!isRevealed ? `<button class="primary-button" type="button" data-reveal-votes ${canReveal ? '' : 'disabled'}>${icon('eye')}Reveal all cards</button>` : ''}<button class="outline-button" type="button" data-clear-votes>${icon('refresh')}Clear votes</button>${isRevealed ? '<button class="outline-button" type="button" data-reset-round>New round</button>' : ''}</div></div>${visibleEntries.length && !isRevealed ? renderVoteResults(visibleEntries) : ''}</div>`;
+    ? `${icon('check')} Votes revealed · ${voteSummary}`
+    : `${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${voteSummary} · ${round.mode === 'hidden' ? 'values hidden' : 'live results'}`;
+  const personalAction = '';
+  const moderatorActions = moderator ? `<button class="outline-button" type="button" data-reset-timer>${icon('clock')}Reset timer</button><button class="outline-button" type="button" data-skip-story>${icon('skip')}Skip story</button><button class="outline-button" type="button" data-clear-votes>${icon('refresh')}Clear votes</button>${isRevealed ? '<button class="primary-button" type="button" data-reset-round>New round</button>' : `<button class="primary-button" type="button" data-reveal-votes ${voteCount > 0 ? '' : 'disabled'}>${icon('eye')}Reveal votes</button>`}` : '';
+  return `<div class="vote-panel ${isRevealed ? 'is-revealed' : ''}"><div class="vote-panel-heading"><div><p class="section-kicker">${isRevealed ? 'Round result' : 'Voting in progress'}</p><h3>${isRevealed ? 'Compare the room' : 'Choose your estimates'}</h3><p>${isRevealed ? 'The room can now compare every player’s perspective and agree a final estimate.' : 'Pick a number card in either section. Normal estimation drives planning; AI is an optional second opinion.'}</p></div><div class="vote-heading-actions">${modeButtons}<span class="round-timer" data-round-timer>${formatRoundTimer(getRemainingRoundSeconds())}</span></div></div>${isRevealed ? renderVoteResults(entries) : `<div class="vote-fields vote-choice-grid">${renderVoteField('manual', ownVote)}${renderVoteField('ai', ownVote)}</div>`}${!isRevealed ? `<div class="vote-players-section"><div class="vote-players-heading"><strong>Players</strong><span>${countVisible ? `${voteCount} of ${players.length} voted` : 'Votes hidden until everyone votes'}</span></div>${renderVotePlayers(players, canSeeValues)}</div>` : ''}<div class="vote-panel-footer"><span class="vote-status">${voteStatus}</span><div class="vote-actions">${personalAction}${moderatorActions}</div></div></div>`;
 }
 
 function renderAllocationCard() {
@@ -861,6 +922,7 @@ function render() {
         <button class="nav-link" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
         <button class="nav-link" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${cloud.rooms.length || 1}</span></button>
         <button class="nav-link" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
+        ${isAdmin() ? `<button class="nav-link" type="button" data-nav="admin">${icon('shield')}<span class="nav-link-label">Admin users</span><span class="nav-count">${cloud.adminUsers.length || ''}</span></button>` : ''}
       </nav>
 
       <div class="sidebar-spacer"></div>
@@ -929,19 +991,10 @@ function render() {
 
             ${renderEpicMetrics(selectedStory)}
 
-            ${selectedStory.type !== 'Epic' ? `<section class="estimate-section">
-              <div class="estimate-section-heading"><h3>Record the final perspectives</h3><p>${sequences[state.sequence].helper} · select or enter a custom value</p></div>
-              <div class="estimate-fields">
-                ${renderEstimateField('manual', selectedStory)}
-                ${renderEstimateField('ai', selectedStory)}
-              </div>
-            </section>
-
-            <div class="estimator-footer">
+            ${selectedStory.type !== 'Epic' ? `<div class="estimator-footer">
               <div class="status-message">${selectedStory.saved ? `${icon('check')} Saved to the room` : `${icon('clock')} Not estimated yet`}</div>
-              <div class="footer-actions"><button class="outline-button" type="button" data-reset>${icon('refresh')}Clear</button><button class="primary-button" type="button" data-save-next>Next ${icon('chevron')}</button></div>
-            </div>
-            </section>` : `<div class="epic-estimate-note">${icon('layers')} This epic is a roll-up. Select one of its linked stories in the queue to record an estimate.</div>`}
+              <div class="footer-actions"><button class="outline-button" type="button" data-reset>${icon('refresh')}Clear estimate</button><button class="primary-button" type="button" data-save-next>Next story ${icon('chevron')}</button></div>
+            </div>` : `<div class="epic-estimate-note">${icon('layers')} This epic is a roll-up. Select one of its linked stories in the queue to record an estimate.</div>`}
           </section>
 
           <aside class="card queue-card" aria-label="Story queue">
@@ -952,7 +1005,7 @@ function render() {
         </div>
 
         <section class="card team-round-card" aria-label="Team round">
-          <div class="team-round-card-heading"><div><p class="section-kicker">Current story voting</p><h2>Team round</h2><p>Flip cards and reveal the team’s votes for the selected story.</p></div><span class="settings-round-story">${icon('note')}${escapeHTML(selectedStory?.title || 'No story selected')}</span></div>
+          <div class="team-round-card-heading"><div><p class="section-kicker">Current story voting</p><h2>Team round</h2><p>Choose number cards, then reveal votes when the room is ready.</p></div><span class="settings-round-story">${icon('note')}${escapeHTML(selectedStory?.title || 'No story selected')}</span></div>
           ${selectedStory.type === 'Epic' ? '<div class="epic-estimate-note team-round-placeholder">Select a linked story to start voting.</div>' : renderVotePanel(selectedStory)}
         </section>
 
@@ -1336,12 +1389,21 @@ function bindEvents() {
   document.querySelectorAll('[data-vote-mode]').forEach((button) => {
     button.addEventListener('click', () => setVoteMode(button.dataset.voteMode));
   });
+  document.querySelector('[data-hide-vote-count]')?.addEventListener('change', (event) => {
+    if (!canModerateRoom()) return;
+    state.round.hideVoteCountUntilComplete = event.target.checked;
+    saveState();
+    render();
+  });
   document.querySelector('[data-start-voting]')?.addEventListener('click', startVoting);
   document.querySelector('[data-flip-card]')?.addEventListener('click', flipVoteCard);
   document.querySelector('[data-reveal-votes]')?.addEventListener('click', revealVotes);
   document.querySelector('[data-apply-round-average]')?.addEventListener('click', applyRoundAverage);
+  document.querySelector('[data-apply-round-override]')?.addEventListener('click', applyRoundOverride);
   document.querySelector('[data-clear-votes]')?.addEventListener('click', clearVotes);
   document.querySelector('[data-reset-round]')?.addEventListener('click', resetRound);
+  document.querySelector('[data-skip-story]')?.addEventListener('click', skipStory);
+  document.querySelector('[data-reset-timer]')?.addEventListener('click', resetRoundTimer);
 
   document.querySelectorAll('[data-vote-type]').forEach((button) => {
     button.addEventListener('click', () => updateVote(button.dataset.voteType, button.dataset.voteValue));
@@ -1827,17 +1889,26 @@ function deleteStory(storyId) {
 }
 
 function startVoting() {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can start a round');
+    return;
+  }
   state.round.storyId = state.selectedStoryId;
   state.round.phase = 'voting';
   state.round.cardFlipped = false;
   state.round.revealedAt = null;
   state.round.submittedCount = getRoundVotes().length;
+  state.round.timerEndsAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
   saveState();
   render();
   showToast(`${state.round.mode === 'hidden' ? 'Hidden' : 'Open'} voting round started`);
 }
 
 function setVoteMode(mode) {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can change voting visibility');
+    return;
+  }
   state.round.mode = mode === 'open' ? 'open' : 'hidden';
   saveState();
   render();
@@ -1913,7 +1984,29 @@ function applyRoundAverage() {
   showToast(`Nearest card value ${formatScore(nearestValue)} applied — choose another value to override it`);
 }
 
+function applyRoundOverride() {
+  const input = document.querySelector('[data-round-override]');
+  const value = input?.value.trim() || '';
+  const estimate = value === '' ? null : normalizeEstimate(value);
+  if (estimate === null) {
+    showToast('Enter a zero or positive number to override the final vote');
+    input?.focus();
+    return;
+  }
+  const story = getSelectedStory();
+  if (!story || story.type === 'Epic') return;
+  story.manual = estimate;
+  story.saved = true;
+  saveState();
+  render();
+  showToast(`Final team vote overridden to ${formatScore(estimate)}`);
+}
+
 function revealVotes() {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can reveal votes');
+    return;
+  }
   if (state.round.phase === 'revealed') {
     state.round.phase = 'voting';
     state.round.revealedAt = null;
@@ -1935,6 +2028,10 @@ function revealVotes() {
 }
 
 function clearVotes() {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can clear votes');
+    return;
+  }
   if (state.round.phase === 'revealed') {
     showToast('Revealed votes are kept in member history — start a new round to vote again');
     return;
@@ -1951,12 +2048,44 @@ function clearVotes() {
 }
 
 function resetRound() {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can start a new round');
+    return;
+  }
   recordCurrentRoundHistory();
   state.round = makeRound(state.selectedStoryId, state.round.mode, state.round.roundNumber + 1);
   saveState();
   clearSiteVotes();
   render();
   showToast('New voting round ready');
+}
+
+function skipStory() {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can skip a story');
+    return;
+  }
+  const stories = state.stories.filter((story) => story.type !== 'Epic');
+  if (!stories.length) return;
+  const currentIndex = stories.findIndex((story) => story.id === state.selectedStoryId);
+  const nextStory = stories[(currentIndex + 1 + stories.length) % stories.length];
+  state.selectedStoryId = nextStory.id;
+  state.round = makeRound(nextStory.id, state.round.mode, state.round.roundNumber + 1);
+  saveState();
+  clearSiteVotes();
+  render();
+  showToast(`Skipped to ${nextStory.title}`);
+}
+
+function resetRoundTimer() {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can reset the timer');
+    return;
+  }
+  state.round.timerEndsAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  saveState();
+  render();
+  showToast('Round timer reset to five minutes');
 }
 
 function addServiceToStory(serviceId) {
@@ -2915,4 +3044,5 @@ function showToast(message) {
 }
 
 render();
+ensureRoundTimerTicker();
 initializeSitesBackend();

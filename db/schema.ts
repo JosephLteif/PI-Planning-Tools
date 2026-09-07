@@ -135,6 +135,7 @@ export const planningRounds = sqliteTable('planning_rounds', {
   mode: text('mode').notNull().default('hidden'),
   submittedCount: integer('submitted_count').notNull().default(0),
   revealedAt: text('revealed_at'),
+  timerEndsAt: text('timer_ends_at'),
   updatedAt: text('updated_at').notNull(),
 }, (table) => ({
   roundsPk: primaryKey({ columns: [table.roomId, table.storyKey, table.roundNumber] }),
