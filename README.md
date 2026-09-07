@@ -14,11 +14,11 @@ Open [http://localhost:4174/](http://localhost:4174/). The local server is a bro
 
 ## Hosted accounts and persistence
 
-The hosted Site uses Sites’ built-in **Sign in with ChatGPT** flow and a small D1 database. No Google OAuth client, Supabase project, browser secret, or API key is required.
+The hosted Site uses Pointline username/password accounts and a small D1 database. The first admin account is bootstrapped from the private `POINTLINE_BOOTSTRAP_ADMIN_USERNAME` and `POINTLINE_BOOTSTRAP_ADMIN_PASSWORD` runtime values.
 
 After sign-in:
 
-- each ChatGPT identity is stored as an account and automatically joins the shared PI 24 room;
+- each Pointline account is stored in D1 and automatically joins the shared PI 24 room;
 - the Rooms page creates separate planning rooms with their own story queue and membership;
 - the Team page creates reusable teams, and invite links can add a person to a team, add a person to a room, or bring a team into a room;
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in D1;
@@ -30,7 +30,7 @@ The Estimates view keeps one active story in focus for the room. Each participan
 
 The D1 schema is defined in [db/schema.ts](db/schema.ts), and the generated migration is under [drizzle](drizzle). The Worker API is [server/index.js](server/index.js). `.openai/hosting.json` declares the logical D1 binding; Sites owns the actual database resource.
 
-The current Site is private to its owner. To let teammates use it, change the Site audience in Sites sharing settings, then have each teammate open the Site and choose **Sign in with ChatGPT**.
+The Site can be shared by publishing it to the intended audience. An admin creates member accounts from the Admin users page, then copies each credential pair to the teammate through a private channel.
 
 ## Deployment
 

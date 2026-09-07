@@ -3235,6 +3235,16 @@ html[data-theme='dark'] .story-row.active {
   border-color: rgba(223, 240, 107, 0.3);
 }
 
+html[data-theme='dark'] .credential-callout {
+  background: #26331d;
+  border-color: #5b7130;
+}
+
+html[data-theme='dark'] .credential-callout pre {
+  background: rgba(7, 15, 27, 0.48);
+  border-color: var(--line);
+}
+
 html[data-theme='dark'] .story-queue-group-heading {
   background: #102036;
 }
@@ -3341,6 +3351,184 @@ html[data-theme='dark'] .epic-metrics {
 
 .management-content {
   margin-top: 54px;
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  padding: 30px;
+  background: var(--canvas);
+  place-items: center;
+}
+
+.auth-card {
+  width: min(100%, 430px);
+  padding: 34px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.auth-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 54px;
+  color: var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.auth-card h1 {
+  margin: 10px 0 0;
+  color: var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(30px, 7vw, 42px);
+  line-height: 1.05;
+  letter-spacing: -0.055em;
+}
+
+.auth-copy {
+  margin: 13px 0 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-form {
+  display: grid;
+  gap: 13px;
+  margin-top: 26px;
+}
+
+.auth-submit {
+  justify-content: center;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.auth-footnote {
+  margin: 20px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.auth-error {
+  margin-top: 18px;
+  padding: 11px 12px;
+  color: var(--coral);
+  background: var(--coral-soft);
+  border: 1px solid rgba(255, 120, 92, 0.35);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.82fr) minmax(0, 1.18fr);
+  gap: 17px;
+  align-items: start;
+}
+
+.admin-create-card,
+.admin-users-card {
+  min-width: 0;
+  padding: 24px;
+}
+
+.admin-user-form {
+  display: grid;
+  gap: 13px;
+  margin-top: 20px;
+}
+
+.admin-user-form .primary-button {
+  justify-self: start;
+  margin-top: 5px;
+}
+
+.credential-callout {
+  display: grid;
+  gap: 12px;
+  margin-top: 23px;
+  padding: 15px;
+  background: #f3f8dc;
+  border: 1px solid #d7e98b;
+  border-radius: var(--radius-md);
+}
+
+.credential-callout h3 {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.credential-callout p:not(.section-kicker) {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.credential-callout pre {
+  margin: 0;
+  padding: 11px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid rgba(19, 33, 55, 0.1);
+  border-radius: var(--radius-sm);
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.credential-callout .outline-button {
+  justify-content: center;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 20px;
+}
+
+.admin-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.admin-user-row > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.admin-user-row strong,
+.admin-user-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-row strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.admin-user-row small {
+  margin-top: 3px;
+  color: var(--ink-muted);
+  font-size: 10px;
 }
 
 .page-intro {
@@ -3820,7 +4008,8 @@ html[data-theme='dark'] .epic-metrics {
   }
 
   .team-layout,
-  .settings-layout {
+  .settings-layout,
+  .admin-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -3828,6 +4017,18 @@ html[data-theme='dark'] .epic-metrics {
 @media (max-width: 640px) {
   .management-content {
     margin-top: 32px;
+  }
+
+  .auth-shell {
+    padding: 15px;
+  }
+
+  .auth-card {
+    padding: 25px 19px;
+  }
+
+  .auth-brand {
+    margin-bottom: 38px;
   }
 
   .page-intro {
@@ -3850,7 +4051,9 @@ html[data-theme='dark'] .epic-metrics {
   .management-section,
   .team-directory-card,
   .team-detail-card,
-  .settings-card {
+  .settings-card,
+  .admin-create-card,
+  .admin-users-card {
     padding: 19px 15px;
   }
 

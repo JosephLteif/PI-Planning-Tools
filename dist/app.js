@@ -216,6 +216,9 @@ let cloud = {
   rooms: localWorkspace.rooms,
   teams: localWorkspace.teams,
   selectedTeamId: localWorkspace.teams[0]?.id || null,
+  adminUsers: [],
+  lastCreatedCredentials: null,
+  authError: '',
   status: 'local',
   memberCount: 1,
 };
@@ -398,6 +401,7 @@ const lucideIconNames = {
   link: 'link', bell: 'bell', sun: 'sun', moon: 'moon', check: 'check', sparkle: 'sparkles',
   refresh: 'refresh-cw', clock: 'clock', info: 'info', note: 'file-text', upload: 'upload', x: 'x',
   lock: 'lock', eye: 'eye', flip: 'refresh-cw', layers: 'layers', cloud: 'cloud', play: 'play',
+  shield: 'shield-check', arrowRight: 'arrow-right', copy: 'copy',
 };
 
 function icon(name, className = '') {
@@ -488,7 +492,7 @@ function getConfiguredRoomId() {
 
 function getViewFromLocation() {
   const view = window.location.hash.replace(/^#/, '').trim().toLowerCase();
-  return ['estimates', 'rooms', 'team', 'resources', 'settings'].includes(view) ? view : 'estimates';
+  return ['estimates', 'rooms', 'team', 'resources', 'settings', 'admin'].includes(view) ? view : 'estimates';
 }
 
 function getCurrentRoom() {
@@ -506,6 +510,10 @@ function getRoomPiLabel() {
 function getUserName(user = cloud.user) {
   if (!user) return 'Jordan L.';
   return user.name || user.full_name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Planner';
+}
+
+function isAdmin() {
+  return cloud.user?.role === 'admin';
 }
 
 function getInitials(name) {
@@ -609,9 +617,7 @@ function renderAuthAction() {
   if (cloud.user) {
     return `<button class="profile-button" type="button" data-auth-action="signout" title="Sign out ${escapeHTML(getUserName())}"><span class="avatar">${escapeHTML(getInitials(getUserName()))}</span><span class="profile-name">${escapeHTML(getUserName())}</span></button>`;
   }
-  return siteRuntime.enabled
-    ? `<a class="outline-button auth-button" href="/signin-with-chatgpt" data-auth-action="signin">${icon('users')}Sign in with ChatGPT</a>`
-    : `<button class="outline-button auth-button" type="button" data-auth-action="signin">${icon('users')}Sign in with ChatGPT</button>`;
+  return `<button class="outline-button auth-button" type="button" data-auth-action="signin">${icon('users')}Sign in</button>`;
 }
 
 function renderCloudStatus() {
@@ -720,6 +726,7 @@ function renderSidebar(view = activeView) {
       <button class="nav-link ${view === 'resources' ? 'active' : ''}" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
       <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
       <button class="nav-link ${view === 'settings' ? 'active' : ''}" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
+      ${isAdmin() ? `<button class="nav-link ${view === 'admin' ? 'active' : ''}" type="button" data-nav="admin">${icon('shield')}<span class="nav-link-label">Admin users</span><span class="nav-count">${cloud.adminUsers.length || ''}</span></button>` : ''}
     </nav>
 
     <div class="sidebar-spacer"></div>
@@ -731,7 +738,7 @@ function renderSidebar(view = activeView) {
 }
 
 function renderTopbar(view = activeView) {
-  const labels = { estimates: 'Estimates', team: 'Team', rooms: 'Rooms', resources: 'Resources', settings: 'Room settings' };
+  const labels = { estimates: 'Estimates', team: 'Team', rooms: 'Rooms', resources: 'Resources', settings: 'Room settings', admin: 'Admin users' };
   return `<header class="topbar">
     <div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<span>${escapeHTML(getRoomName())}</span>${icon('chevron')}<span>${labels[view]}</span></div>
     <div class="topbar-actions">
@@ -743,6 +750,11 @@ function renderTopbar(view = activeView) {
   </header>`;
 }
 
+function renderLoginPage() {
+  const isBusy = cloud.status === 'connecting';
+  return `<main class="auth-shell"><section class="auth-card"><div class="auth-brand"><span class="brand-mark">P</span><span>pointline</span></div><p class="eyebrow">PI planning workspace</p><h1>Sign in to Pointline.</h1><p class="auth-copy">Use the username and password shared by your Pointline admin.</p>${cloud.authError ? `<div class="auth-error" role="alert">${escapeHTML(cloud.authError)}</div>` : ''}<form class="auth-form" data-login-form><label class="modal-field"><span>Username</span><input class="modal-input" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" ${isBusy ? 'disabled' : ''} /></label><label class="modal-field"><span>Password</span><input class="modal-input" type="password" name="password" required autocomplete="current-password" ${isBusy ? 'disabled' : ''} /></label><button class="primary-button auth-submit" type="submit" ${isBusy ? 'disabled' : ''}>${isBusy ? 'Signing in…' : 'Sign in'} ${icon('arrowRight')}</button></form><p class="auth-footnote">Need access? Ask your Pointline admin to create an account for you.</p></section></main>`;
+}
+
 function renderRoomsPage() {
   return `<section class="page-intro">
     <div><p class="eyebrow">Workspace · rooms</p><h1>Choose where the planning happens.</h1><p class="page-intro-copy">Keep each increment focused. Create a room for a planning session, then invite the people or team who should estimate together.</p></div>
@@ -752,6 +764,12 @@ function renderRoomsPage() {
     <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
     <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
   </section>`;
+}
+
+function renderAdminPage() {
+  const credentials = cloud.lastCreatedCredentials;
+  const credentialText = credentials ? `Username: ${credentials.username}\nPassword: ${credentials.password}\nPointline: ${window.location.origin}` : '';
+  return `<section class="page-intro"><div><p class="eyebrow">Workspace · administration</p><h1>Manage Pointline users.</h1><p class="page-intro-copy">Create member accounts, then copy their credentials to share privately. Passwords are never shown again after you leave this page.</p></div></section><section class="admin-layout"><section class="card admin-create-card"><div class="section-heading"><div><p class="section-kicker">New account</p><h2>Create a user</h2></div></div><form class="admin-user-form" data-admin-user-form><label class="modal-field"><span>Display name</span><input class="modal-input" name="displayName" required maxlength="120" placeholder="e.g. Alex Morgan" /></label><label class="modal-field"><span>Username</span><input class="modal-input" name="username" required minlength="3" maxlength="40" pattern="[A-Za-z][A-Za-z0-9._-]{2,39}" autocapitalize="none" spellcheck="false" placeholder="e.g. alex.morgan" /></label><label class="modal-field"><span>Temporary password</span><input class="modal-input" type="password" name="password" required minlength="12" maxlength="200" autocomplete="new-password" placeholder="At least 12 characters" /></label><button class="primary-button" type="submit">Create credentials ${icon('plus')}</button></form>${credentials ? `<div class="credential-callout"><div><p class="section-kicker">Ready to share</p><h3>${escapeHTML(credentials.username)}’s credentials</h3><p>Copy this once and send it through your normal private channel.</p></div><pre>${escapeHTML(credentialText)}</pre><button class="outline-button" type="button" data-copy-credentials="${escapeHTML(credentialText)}">${icon('copy')}Copy credentials</button></div>` : ''}</section><section class="card admin-users-card"><div class="section-heading"><div><p class="section-kicker">Accounts</p><h2>Pointline users</h2></div><span class="section-count">${cloud.adminUsers.length}</span></div><div class="admin-user-list">${cloud.adminUsers.length ? cloud.adminUsers.map((user) => `<div class="admin-user-row"><span class="avatar small-avatar">${escapeHTML(getInitials(user.name))}</span><span><strong>${escapeHTML(user.name)}</strong><small>${escapeHTML(user.username)} · ${user.role === 'admin' ? 'Administrator' : 'Member'}</small></span><span class="member-role">${user.disabled ? 'Disabled' : 'Active'}</span></div>`).join('') : '<p class="empty-manager">No username accounts yet.</p>'}</div></section></section>`;
 }
 
 function getSelectedTeam() {
@@ -789,13 +807,20 @@ function renderManagementPage() {
       ? renderTeamPage()
       : activeView === 'resources'
         ? `<section class="page-intro"><div><p class="eyebrow">Workspace · resources</p><h1>See where the work lands.</h1><p class="page-intro-copy">Use the same saved story estimates to understand service and domain allocation.</p></div></section>${renderAllocationCard()}`
-        : renderSettingsPage();
+        : activeView === 'admin' && isAdmin()
+          ? renderAdminPage()
+          : renderSettingsPage();
 
   document.querySelector('#app').innerHTML = `${renderSidebar(activeView)}<main class="main-area">${renderTopbar(activeView)}<div class="main-content management-content">${content}</div></main>`;
   bindEvents();
 }
 
 function render() {
+  if (siteRuntime.enabled && !cloud.user) {
+    document.querySelector('#app').innerHTML = renderLoginPage();
+    bindEvents();
+    return;
+  }
   if (activeView !== 'estimates') {
     renderManagementPage();
     return;
@@ -1183,6 +1208,10 @@ function addImportedStories(stories) {
 }
 
 function bindEvents() {
+  document.querySelector('[data-login-form]')?.addEventListener('submit', loginWithPassword);
+  document.querySelector('[data-admin-user-form]')?.addEventListener('submit', createUserFromAdmin);
+  document.querySelector('[data-copy-credentials]')?.addEventListener('click', (event) => copyText(event.currentTarget.dataset.copyCredentials, 'Credentials copied'));
+
   document.querySelectorAll('[data-nav]').forEach((button) => {
     button.addEventListener('click', () => navigateToView(button.dataset.nav));
   });
@@ -1329,9 +1358,9 @@ function bindEvents() {
     if (cloud.user) {
       event.preventDefault();
       signOut();
-    } else if (!siteRuntime.enabled) {
+    } else {
       event.preventDefault();
-      signInWithChatGPT();
+      showToast('Sign in is available on the hosted Pointline site');
     }
   });
 }
@@ -1390,12 +1419,14 @@ function normalizeTeamRecord(team) {
 async function refreshWorkspaceData() {
   if (!siteRuntime.ready) return;
   try {
-    const [roomsPayload, teamsPayload] = await Promise.all([
+    const [roomsPayload, teamsPayload, adminPayload] = await Promise.all([
       siteRequest(roomScopedApiPath('/api/rooms')),
       siteRequest(roomScopedApiPath('/api/teams')),
+      isAdmin() ? siteRequest('/api/admin/users') : Promise.resolve({ users: [] }),
     ]);
     cloud.rooms = Array.isArray(roomsPayload.rooms) ? roomsPayload.rooms.map(normalizeRoomRecord) : [];
     cloud.teams = Array.isArray(teamsPayload.teams) ? teamsPayload.teams.map(normalizeTeamRecord) : [];
+    cloud.adminUsers = Array.isArray(adminPayload.users) ? adminPayload.users : [];
     cloud.selectedTeamId = cloud.teams.some((team) => team.id === cloud.selectedTeamId) ? cloud.selectedTeamId : cloud.teams[0]?.id || null;
     render();
   } catch (error) {
@@ -1913,7 +1944,8 @@ function setBreakdown(kind) {
 }
 
 function navigateToView(view) {
-  if (!['estimates', 'rooms', 'team', 'resources', 'settings'].includes(view)) return;
+  if (!['estimates', 'rooms', 'team', 'resources', 'settings', 'admin'].includes(view)) return;
+  if (view === 'admin' && !isAdmin()) return;
   activeView = view;
   window.history.pushState({}, '', `#${view}`);
   render();
@@ -1953,21 +1985,91 @@ function updateCloudStatusBadge() {
   if (badge) badge.innerHTML = renderCloudStatus();
 }
 
-function signInWithChatGPT() {
-  if (siteRuntime.enabled) {
-    window.location.assign('/signin-with-chatgpt');
-    return;
+async function loginWithPassword(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const submit = event.currentTarget.querySelector('[type="submit"]');
+  const username = String(form.get('username') || '').trim();
+  const password = String(form.get('password') || '');
+  if (!username || !password) return;
+  cloud.authError = '';
+  cloud.status = 'connecting';
+  if (submit) submit.disabled = true;
+  render();
+  try {
+    const payload = await siteRequest('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    cloud.user = payload.user || null;
+    cloud.status = 'connecting';
+    await loadAuthenticatedSiteSession();
+  } catch (error) {
+    cloud.user = null;
+    cloud.status = error.status === 401 ? 'auth' : 'error';
+    cloud.authError = error.message || 'Sign in failed';
+    render();
   }
-  showToast('ChatGPT sign-in is available from the hosted Pointline Site');
 }
 
-function signOut() {
-  if (siteRuntime.enabled) {
-    const returnTo = `${window.location.pathname}${window.location.search}`;
-    window.location.assign(`/signout-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
-    return;
+async function signOut() {
+  try {
+    if (siteRuntime.enabled) await siteRequest('/api/auth/logout', { method: 'POST' });
+  } catch (error) {
+    console.warn('Pointline sign out failed', error);
   }
-  showToast('ChatGPT sign-out is available from the hosted Pointline Site');
+  if (siteRuntime.pollTimer) {
+    clearInterval(siteRuntime.pollTimer);
+    siteRuntime.pollTimer = null;
+  }
+  siteRuntime.ready = false;
+  siteRuntime.saveTimers.forEach((timer) => clearTimeout(timer));
+  siteRuntime.saveTimers.clear();
+  cloud.user = null;
+  cloud.adminUsers = [];
+  cloud.lastCreatedCredentials = null;
+  cloud.authError = '';
+  cloud.status = siteRuntime.enabled ? 'auth' : 'local';
+  render();
+}
+
+function handleSessionExpired(error) {
+  if (error.status !== 401 || !siteRuntime.enabled) return false;
+  if (siteRuntime.pollTimer) {
+    clearInterval(siteRuntime.pollTimer);
+    siteRuntime.pollTimer = null;
+  }
+  siteRuntime.ready = false;
+  cloud.user = null;
+  cloud.status = 'auth';
+  cloud.authError = 'Your session expired. Sign in again to continue.';
+  render();
+  return true;
+}
+
+async function createUserFromAdmin(event) {
+  event.preventDefault();
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  const submit = formElement.querySelector('[type="submit"]');
+  const displayName = String(form.get('displayName') || '').trim();
+  const username = String(form.get('username') || '').trim();
+  const password = String(form.get('password') || '');
+  if (!displayName || !username || !password) return;
+  if (submit) submit.disabled = true;
+  try {
+    const payload = await siteRequest('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ displayName, username, password }),
+    });
+    cloud.lastCreatedCredentials = payload.credentials || null;
+    cloud.adminUsers = [payload.user, ...cloud.adminUsers.filter((user) => user.id !== payload.user?.id)];
+    render();
+    showToast(`${displayName} can now sign in`);
+  } catch (error) {
+    if (submit) submit.disabled = false;
+    showToast(error.message || 'User could not be created');
+  }
 }
 
 async function siteRequest(path, options = {}) {
@@ -2066,6 +2168,7 @@ async function refreshSiteState({ renderAfter = true } = {}) {
     if (renderAfter) render();
     else updateCloudStatusBadge();
   } catch (error) {
+    if (handleSessionExpired(error)) return;
     cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
     if (error.status !== 401) console.warn('Pointline Site state refresh failed', error);
@@ -2103,6 +2206,7 @@ function queueSiteCloudSync() {
         if (shouldRefreshAfterReveal) window.setTimeout(() => refreshSiteState(), 0);
       }
     } catch (error) {
+      if (handleSessionExpired(error)) return;
       if (siteRuntime.revisionRoomId === roomId && activeRoomId === roomId && cloud.roomId === roomId) {
         cloud.status = error.status === 401 ? 'auth' : 'error';
         updateCloudStatusBadge();
@@ -2142,6 +2246,7 @@ async function syncSiteVote(retry = 0) {
       window.setTimeout(() => syncSiteVote(1), 400);
       return;
     }
+    if (handleSessionExpired(error)) return;
     cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
     console.warn('Pointline Site vote sync failed', error);
@@ -2156,6 +2261,7 @@ async function clearSiteVotes() {
       body: JSON.stringify({ storyId: state.round.storyId, roundNumber: state.round.roundNumber }),
     });
   } catch (error) {
+    if (handleSessionExpired(error)) return;
     cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
     console.warn('Pointline Site vote clear failed', error);
@@ -2177,11 +2283,7 @@ async function acceptPendingInvite() {
   return roomId;
 }
 
-async function initializeSitesBackend() {
-  if (!siteRuntime.enabled) return;
-  cloud.status = 'connecting';
-  updateCloudStatusBadge();
-  render();
+async function loadAuthenticatedSiteSession() {
   try {
     const configuredRoomId = getConfiguredRoomId();
     let me;
@@ -2195,6 +2297,7 @@ async function initializeSitesBackend() {
       me = await siteRequest(`/api/me${acceptedRoomId ? `?room=${encodeURIComponent(acceptedRoomId)}` : ''}`);
     }
     cloud.user = me.user || null;
+    cloud.authError = '';
     cloud.roomId = me.roomId || null;
     cloud.room = normalizeRoomRecord(me.room);
     cloud.memberCount = Math.max(1, Number(me.memberCount) || 1);
@@ -2217,11 +2320,27 @@ async function initializeSitesBackend() {
     await refreshWorkspaceData();
     startSitePolling();
   } catch (error) {
+    throw error;
+  }
+}
+
+async function initializeSitesBackend() {
+  if (!siteRuntime.enabled) return;
+  cloud.status = 'connecting';
+  cloud.authError = '';
+  render();
+  try {
+    await loadAuthenticatedSiteSession();
+  } catch (error) {
     cloud.user = null;
     cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
     render();
-    if (error.status !== 401) console.warn('Pointline Site account setup failed', error);
+    if (error.status !== 401) {
+      cloud.authError = error.message || 'Pointline could not load your account';
+      render();
+      console.warn('Pointline Site account setup failed', error);
+    }
   }
 }
 

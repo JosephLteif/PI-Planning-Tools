@@ -5,6 +5,11 @@ const ALLOWED_SEQUENCES = new Set(['sequential', 'fibonacci', 'modified']);
 const ALLOWED_PHASES = new Set(['idle', 'voting', 'revealed']);
 const ALLOWED_INVITE_KINDS = new Set(['room-person', 'room-team', 'team']);
 const ROOM_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
+const USERNAME_PATTERN = /^[a-z][a-z0-9._-]{2,39}$/;
+const SESSION_COOKIE = 'pointline_session';
+const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_ITERATIONS = 120000;
 const MAX_BODY_BYTES = 1_500_000;
 const STATIC_ASSETS = new Map();
 
@@ -13,30 +18,96 @@ const JSON_HEADERS = {
   'cache-control': 'no-store',
 };
 
-function json(body, status = 200) {
+function json(body, status = 200, extraHeaders = {}) {
+  const headers = new Headers(JSON_HEADERS);
+  Object.entries(extraHeaders).forEach(([key, value]) => headers.set(key, value));
   return new Response(JSON.stringify(body), {
     status,
-    headers: JSON_HEADERS,
+    headers,
   });
 }
 
-function getIdentity(request) {
-  const id = request.headers.get('oai-authenticated-user-id')?.trim();
-  if (!id) return null;
-
-  const encodedName = request.headers.get('oai-authenticated-user-full-name')?.trim() || '';
-  let name = encodedName;
-  try {
-    name = decodeURIComponent(encodedName);
-  } catch {
-    // Keep the raw header when an optional display name is not encoded cleanly.
-  }
-
+function accountUser(account) {
   return {
-    id: id.slice(0, 200),
-    email: (request.headers.get('oai-authenticated-user-email') || '').trim().slice(0, 320),
-    name: name.slice(0, 160),
+    id: account.id,
+    username: account.username || '',
+    name: account.display_name || account.username || 'Planner',
+    email: account.email || '',
+    role: account.role === 'admin' ? 'admin' : 'member',
   };
+}
+
+function normalizeUsername(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function requestCookie(request, name) {
+  const cookieHeader = request.headers.get('cookie') || '';
+  for (const part of cookieHeader.split(';')) {
+    const [key, ...valueParts] = part.trim().split('=');
+    if (key === name) return valueParts.join('=');
+  }
+  return '';
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function bytesToBase64Url(bytes) {
+  return bytesToBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
+
+async function sha256Base64Url(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
+async function createPasswordRecord(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const digest = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256);
+  return { salt: bytesToBase64(salt), hash: bytesToBase64(new Uint8Array(digest)) };
+}
+
+async function verifyPassword(password, salt, expectedHash) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const digest = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: base64ToBytes(salt), iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256);
+  const actual = new Uint8Array(digest);
+  const expected = base64ToBytes(expectedHash);
+  if (actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) difference |= actual[index] ^ expected[index];
+  return difference === 0;
+}
+
+async function getSessionUser(db, request) {
+  const sessionToken = requestCookie(request, SESSION_COOKIE);
+  if (!sessionToken) return null;
+  const sessionId = await sha256Base64Url(sessionToken);
+  const account = await db.prepare(`SELECT a.id, a.username, a.email, a.display_name, a.role
+    FROM sessions s JOIN accounts a ON a.id = s.account_id
+    WHERE s.id = ? AND s.expires_at > ? AND a.disabled = 0 LIMIT 1`)
+    .bind(sessionId, new Date().toISOString())
+    .first();
+  return account ? accountUser(account) : null;
+}
+
+function sessionCookie(token, maxAge = SESSION_MAX_AGE_SECONDS) {
+  return `${SESSION_COOKIE}=${token}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function authError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 function roomIdFromRequest(request) {
@@ -170,24 +241,148 @@ async function readJson(request) {
   }
 }
 
-async function ensureAccountAndRoom(db, user) {
-  const email = user.email || `${user.id}@chatgpt.local`;
+function validateUsername(value) {
+  const username = normalizeUsername(value);
+  if (!USERNAME_PATTERN.test(username)) {
+    throw authError('Use 3–40 lowercase letters, numbers, dots, underscores, or hyphens for the username');
+  }
+  return username;
+}
+
+function validatePassword(value) {
+  const password = String(value ?? '');
+  if (password.length < PASSWORD_MIN_LENGTH || password.length > 200) {
+    throw authError(`Password must be between ${PASSWORD_MIN_LENGTH} and 200 characters`);
+  }
+  return password;
+}
+
+async function ensureBootstrapAdmin(db, env) {
+  const existingAdmin = await db.prepare(`SELECT id, username, email, display_name, role
+    FROM accounts WHERE role = 'admin' AND disabled = 0 ORDER BY created_at, id LIMIT 1`).first();
+  if (existingAdmin) return accountUser(existingAdmin);
+
+  const username = normalizeUsername(env.POINTLINE_BOOTSTRAP_ADMIN_USERNAME);
+  const password = String(env.POINTLINE_BOOTSTRAP_ADMIN_PASSWORD || '');
+  if (!USERNAME_PATTERN.test(username) || password.length < PASSWORD_MIN_LENGTH) {
+    throw authError('Pointline admin bootstrap credentials are not configured', 503);
+  }
+
+  const existingAccount = await db.prepare('SELECT id FROM accounts WHERE username = ? LIMIT 1').bind(username).first();
+  const accountId = existingAccount?.id || makeId('acct');
+  const passwordRecord = await createPasswordRecord(password);
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare(`INSERT INTO accounts (id, email, display_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET email = excluded.email, display_name = excluded.display_name, updated_at = excluded.updated_at`)
-      .bind(user.id, email, user.name || null, now, now),
+    existingAccount
+      ? db.prepare(`UPDATE accounts SET email = ?, display_name = ?, password_hash = ?, password_salt = ?, role = 'admin', disabled = 0, updated_at = ? WHERE id = ?`)
+        .bind(`${username}@pointline.local`, 'Pointline Admin', passwordRecord.hash, passwordRecord.salt, now, accountId)
+      : db.prepare(`INSERT INTO accounts
+        (id, email, display_name, username, password_hash, password_salt, role, disabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'admin', 0, ?, ?)`)
+        .bind(accountId, `${username}@pointline.local`, 'Pointline Admin', username, passwordRecord.hash, passwordRecord.salt, now, now),
     db.prepare(`INSERT OR IGNORE INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`)
-      .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, 'fibonacci', 'hidden', now, now),
-    db.prepare(`UPDATE rooms SET owner_account_id = COALESCE(owner_account_id, ?)
-      WHERE id = ?`)
-      .bind(user.id, DEFAULT_ROOM_ID),
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', ?, ?)`)
+      .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, accountId, now, now),
+    db.prepare('UPDATE rooms SET owner_account_id = ? WHERE id = ?').bind(accountId, DEFAULT_ROOM_ID),
+    db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'owner', ?)
+      ON CONFLICT(room_id, account_id) DO UPDATE SET role = 'owner'`)
+      .bind(DEFAULT_ROOM_ID, accountId, now),
+  ]);
+  const account = await db.prepare('SELECT id, username, email, display_name, role FROM accounts WHERE id = ? LIMIT 1').bind(accountId).first();
+  return accountUser(account);
+}
+
+async function ensureDefaultRoomMembership(db, user) {
+  const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(DEFAULT_ROOM_ID).first();
+  if (!room) {
+    const now = new Date().toISOString();
+    await db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', ?, ?)`)
+      .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, now, now)
+      .run();
+  }
+  await db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
+    VALUES (?, ?, 'editor', ?)`)
+    .bind(DEFAULT_ROOM_ID, user.id, new Date().toISOString())
+    .run();
+}
+
+async function createSession(db, accountId) {
+  const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = bytesToBase64Url(tokenBytes);
+  const sessionId = await sha256Base64Url(token);
+  const now = new Date();
+  await db.prepare(`INSERT INTO sessions (id, account_id, expires_at, created_at, last_seen_at)
+    VALUES (?, ?, ?, ?, ?)`)
+    .bind(sessionId, accountId, new Date(now.getTime() + SESSION_MAX_AGE_SECONDS * 1000).toISOString(), now.toISOString(), now.toISOString())
+    .run();
+  return token;
+}
+
+async function login(db, env, input) {
+  await ensureBootstrapAdmin(db, env);
+  const username = normalizeUsername(input?.username);
+  const password = String(input?.password ?? '');
+  const account = USERNAME_PATTERN.test(username)
+    ? await db.prepare(`SELECT id, username, email, display_name, role, disabled, password_hash, password_salt
+      FROM accounts WHERE username = ? LIMIT 1`).bind(username).first()
+    : null;
+  if (!account || account.disabled === 1 || !account.password_hash || !account.password_salt || password.length > 200 || !(await verifyPassword(password, account.password_salt, account.password_hash))) {
+    throw authError('Invalid username or password', 401);
+  }
+  const now = new Date().toISOString();
+  await db.prepare('UPDATE accounts SET last_login_at = ?, updated_at = ? WHERE id = ?').bind(now, now, account.id).run();
+  const user = accountUser(account);
+  await ensureDefaultRoomMembership(db, user);
+  const token = await createSession(db, account.id);
+  return { user, token };
+}
+
+async function logout(db, request) {
+  const token = requestCookie(request, SESSION_COOKIE);
+  if (token) await db.prepare('DELETE FROM sessions WHERE id = ?').bind(await sha256Base64Url(token)).run();
+  return json({ ok: true }, 200, { 'set-cookie': sessionCookie('', 0) });
+}
+
+function requireAdmin(user) {
+  if (user?.role !== 'admin') throw authError('Only an admin can manage users', 403);
+}
+
+async function readAdminUsers(db) {
+  const result = await db.prepare(`SELECT id, username, email, display_name, role, disabled, created_at, last_login_at
+    FROM accounts WHERE username IS NOT NULL ORDER BY role DESC, username`).all();
+  return rows(result).map((account) => ({
+    ...accountUser(account),
+    disabled: account.disabled === 1,
+    createdAt: account.created_at,
+    lastLoginAt: account.last_login_at || null,
+  }));
+}
+
+async function createManagedUser(db, user, input) {
+  requireAdmin(user);
+  const username = validateUsername(input?.username);
+  const password = validatePassword(input?.password);
+  const displayName = cleanText(input?.displayName, username, 120);
+  const existing = await db.prepare('SELECT id FROM accounts WHERE username = ? LIMIT 1').bind(username).first();
+  if (existing) throw authError('That username is already in use', 409);
+  const passwordRecord = await createPasswordRecord(password);
+  const accountId = makeId('acct');
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`INSERT INTO accounts
+      (id, email, display_name, username, password_hash, password_salt, role, disabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'member', 0, ?, ?)`)
+      .bind(accountId, `${username}@pointline.local`, displayName, username, passwordRecord.hash, passwordRecord.salt, now, now),
     db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
       VALUES (?, ?, 'editor', ?)`)
-      .bind(DEFAULT_ROOM_ID, user.id, now),
+      .bind(DEFAULT_ROOM_ID, accountId, now),
   ]);
+  return {
+    user: accountUser({ id: accountId, username, email: `${username}@pointline.local`, display_name: displayName, role: 'member' }),
+    credentials: { username, password },
+  };
 }
 
 async function requireMember(db, roomId, userId) {
@@ -658,14 +853,22 @@ async function acceptInvite(db, user, token) {
 async function handleApi(request, env) {
   if (!env.DB) return json({ error: 'The Pointline database binding is not configured' }, 500);
   const url = new URL(request.url);
-  const user = getIdentity(request);
   if (url.pathname === '/api/invites' && request.method === 'GET') {
     const invite = await readInvite(env.DB, cleanInviteToken(url.searchParams.get('token')));
     return invite ? json({ invite }) : json({ error: 'This invite link is missing or expired' }, 404);
   }
-  if (!user) return json({ error: 'Sign in with ChatGPT to use this planning room' }, 401);
+  if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+    const result = await login(env.DB, env, await readJson(request));
+    return json({ ok: true, user: result.user }, 200, { 'set-cookie': sessionCookie(result.token) });
+  }
+  const user = await getSessionUser(env.DB, request);
+  if (url.pathname === '/api/auth/logout' && request.method === 'POST') return logout(env.DB, request);
+  if (url.pathname === '/api/auth/session' && request.method === 'GET') {
+    return user ? json({ user }) : json({ error: 'Sign in required' }, 401);
+  }
+  if (!user) return json({ error: 'Sign in with your Pointline username and password' }, 401);
+  await ensureDefaultRoomMembership(env.DB, user);
   const roomId = roomIdFromRequest(request);
-  await ensureAccountAndRoom(env.DB, user);
 
   if (url.pathname === '/api/invites/accept' && request.method === 'POST') {
     const input = await readJson(request);
@@ -704,6 +907,14 @@ async function handleApi(request, env) {
   if (url.pathname === '/api/teams' && request.method === 'POST') {
     const team = await createTeam(env.DB, user, await readJson(request));
     return json({ ok: true, team }, 201);
+  }
+  if (url.pathname === '/api/admin/users' && request.method === 'GET') {
+    requireAdmin(user);
+    return json({ users: await readAdminUsers(env.DB) });
+  }
+  if (url.pathname === '/api/admin/users' && request.method === 'POST') {
+    const result = await createManagedUser(env.DB, user, await readJson(request));
+    return json({ ok: true, ...result }, 201);
   }
   if (url.pathname === '/api/invites' && request.method === 'POST') {
     return json(await createInvite(env.DB, request, user, await readJson(request)), 201);

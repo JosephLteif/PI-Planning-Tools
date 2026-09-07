@@ -1,12 +1,31 @@
-import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const accounts = sqliteTable('accounts', {
   id: text('id').primaryKey(),
   email: text('email').notNull(),
   displayName: text('display_name'),
+  username: text('username'),
+  passwordHash: text('password_hash'),
+  passwordSalt: text('password_salt'),
+  role: text('role').notNull().default('member'),
+  disabled: integer('disabled').notNull().default(0),
+  lastLoginAt: text('last_login_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
-});
+}, (table) => ({
+  accountsUsernameIdx: uniqueIndex('accounts_username_idx').on(table.username),
+}));
+
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  expiresAt: text('expires_at').notNull(),
+  createdAt: text('created_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull(),
+}, (table) => ({
+  sessionsAccountIdx: index('sessions_account_idx').on(table.accountId),
+  sessionsExpiryIdx: index('sessions_expiry_idx').on(table.expiresAt),
+}));
 
 export const rooms = sqliteTable('rooms', {
   id: text('id').primaryKey(),
