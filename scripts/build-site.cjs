@@ -3,7 +3,7 @@ const path = require('node:path');
 
 const project = path.resolve(process.argv[2] || process.cwd());
 const dist = path.join(project, 'dist');
-const staticFiles = ['index.html', 'app.js', 'styles.css'];
+const staticFiles = ['index.html', 'app.js', 'styles.css', 'favicon.svg'];
 const iconLibrary = path.join(project, 'node_modules', 'lucide', 'dist', 'umd', 'lucide.min.js');
 
 fs.mkdirSync(path.join(dist, 'server'), { recursive: true });

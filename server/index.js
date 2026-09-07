@@ -12,6 +12,7 @@ const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_ITERATIONS = 100000;
 const MAX_BODY_BYTES = 1_500_000;
 const STATIC_ASSETS = new Map();
+const ROOM_STREAMS = new Map();
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -25,6 +26,10 @@ function json(body, status = 200, extraHeaders = {}) {
     status,
     headers,
   });
+}
+
+function streamEvent(event, payload) {
+  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
 function accountUser(account) {
@@ -415,6 +420,53 @@ async function requireTeamMember(db, teamId, userId) {
   return member;
 }
 
+async function requireRoomManager(db, roomId, user) {
+  const room = await db.prepare('SELECT owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  if (!room) throw authError('Room not found', 404);
+  if (user?.role === 'admin') return;
+  if (room.owner_account_id !== user.id) throw authError('Only the room owner can manage room members', 403);
+}
+
+async function readDirectoryUsers(db) {
+  const result = await db.prepare(`SELECT id, username, email, display_name, role
+    FROM accounts WHERE disabled = 0 AND username IS NOT NULL ORDER BY display_name, username`).all();
+  return rows(result).map(accountUser);
+}
+
+async function addTeamMember(db, user, teamId, accountId) {
+  const team = await db.prepare('SELECT owner_account_id FROM teams WHERE id = ? LIMIT 1').bind(teamId).first();
+  if (!team) throw authError('Team not found', 404);
+  if (user.role !== 'admin' && team.owner_account_id !== user.id) {
+    throw authError('Only the team owner can manage team members', 403);
+  }
+  const account = await db.prepare('SELECT id FROM accounts WHERE id = ? AND disabled = 0 LIMIT 1').bind(accountId).first();
+  if (!account) throw authError('Member not found', 404);
+  await db.prepare(`INSERT OR IGNORE INTO team_members (team_id, account_id, role, created_at)
+    VALUES (?, ?, 'member', ?)`).bind(teamId, accountId, new Date().toISOString()).run();
+  const teams = await readTeams(db, user.id);
+  return teams.find((candidate) => candidate.id === teamId) || null;
+}
+
+async function addRoomMembers(db, user, roomId, input) {
+  await requireRoomManager(db, roomId, user);
+  const accountId = cleanId(input?.accountId);
+  const teamId = cleanId(input?.teamId);
+  if ((!accountId && !teamId) || (accountId && teamId)) throw authError('Choose one member or team', 400);
+  const now = new Date().toISOString();
+  if (teamId) {
+    await requireTeamMember(db, teamId, user.id);
+    await db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
+      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ?`)
+      .bind(roomId, now, teamId).run();
+  } else {
+    const account = await db.prepare('SELECT id FROM accounts WHERE id = ? AND disabled = 0 LIMIT 1').bind(accountId).first();
+    if (!account) throw authError('Member not found', 404);
+    await db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?)`).bind(roomId, accountId, now).run();
+  }
+  return readRoomState(db, roomId, user.id);
+}
+
 async function readRoomState(db, roomId, userId) {
   const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
@@ -565,6 +617,56 @@ async function readRoomState(db, roomId, userId) {
       }
       : null,
   };
+}
+
+async function publishRoomState(db, roomId) {
+  const subscribers = ROOM_STREAMS.get(roomId);
+  if (!subscribers?.size) return;
+  await Promise.all([...subscribers].map(async (subscriber) => {
+    try {
+      const payload = await readRoomState(db, roomId, subscriber.userId);
+      subscriber.controller.enqueue(subscriber.encoder.encode(streamEvent('state', { roomId, ...payload })));
+    } catch {
+      subscriber.cleanup();
+    }
+  }));
+}
+
+function createRoomStream(roomId, userId, initialPayload) {
+  const encoder = new TextEncoder();
+  let subscriber;
+  const stream = new ReadableStream({
+    start(controller) {
+      const cleanup = () => {
+        if (!subscriber) return;
+        clearInterval(subscriber.heartbeat);
+        ROOM_STREAMS.get(roomId)?.delete(subscriber);
+        if (!ROOM_STREAMS.get(roomId)?.size) ROOM_STREAMS.delete(roomId);
+        subscriber = null;
+      };
+      subscriber = {
+        controller,
+        encoder,
+        userId,
+        cleanup,
+        heartbeat: setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(': keep-alive\n\n'));
+          } catch {
+            cleanup();
+          }
+        }, 25000),
+      };
+      const subscribers = ROOM_STREAMS.get(roomId) || new Set();
+      subscribers.add(subscriber);
+      ROOM_STREAMS.set(roomId, subscribers);
+      controller.enqueue(encoder.encode(streamEvent('state', { roomId, ...initialPayload })));
+    },
+    cancel() {
+      subscriber?.cleanup();
+    },
+  });
+  return stream;
 }
 
 async function readRooms(db, user) {
@@ -884,6 +986,7 @@ async function acceptInvite(db, user, token) {
       .bind(invite.room.id, user.id, now));
   }
   await db.batch(statements);
+  if (invite.room?.id) await publishRoomState(db, invite.room.id);
   return { invite, roomId: invite.room?.id || null, teamId: invite.team?.id || null };
 }
 
@@ -906,6 +1009,26 @@ async function handleApi(request, env) {
   if (!user) return json({ error: 'Sign in with your Pointline username and password' }, 401);
   await ensureDefaultRoomMembership(env.DB, user);
   const roomId = roomIdFromRequest(request);
+
+  const teamMemberPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)\/members$/);
+  if (teamMemberPathMatch && request.method === 'POST') {
+    const teamId = decodeURIComponent(teamMemberPathMatch[1]);
+    const input = await readJson(request);
+    const team = await addTeamMember(env.DB, user, teamId, cleanId(input?.accountId));
+    return json({ ok: true, team });
+  }
+
+  const roomMemberPathMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/members$/);
+  if (roomMemberPathMatch && request.method === 'POST') {
+    const targetRoomId = decodeURIComponent(roomMemberPathMatch[1]);
+    const room = await addRoomMembers(env.DB, user, targetRoomId, await readJson(request));
+    await publishRoomState(env.DB, targetRoomId);
+    return json({ ok: true, roomId: targetRoomId, room: room.room, memberCount: room.memberCount });
+  }
+
+  if (url.pathname === '/api/directory/users' && request.method === 'GET') {
+    return json({ users: await readDirectoryUsers(env.DB) });
+  }
 
   if (url.pathname === '/api/invites/accept' && request.method === 'POST') {
     const input = await readJson(request);
@@ -960,9 +1083,20 @@ async function handleApi(request, env) {
     const room = await readRoomState(env.DB, roomId, user.id);
     return json({ roomId, ...room });
   }
+  if (url.pathname === '/api/state/stream' && request.method === 'GET') {
+    const room = await readRoomState(env.DB, roomId, user.id);
+    return new Response(createRoomStream(roomId, user.id, { ...room }), {
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        'connection': 'keep-alive',
+      },
+    });
+  }
   if (url.pathname === '/api/state' && request.method === 'PUT') {
     await saveRoomState(env.DB, roomId, await readJson(request));
     const room = await readRoomState(env.DB, roomId, user.id);
+    await publishRoomState(env.DB, roomId);
     return json({ ok: true, roomId, ...room });
   }
   if (url.pathname === '/api/vote' && request.method === 'PUT') {
@@ -997,6 +1131,7 @@ async function handleApi(request, env) {
     }
     const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM votes
       WHERE room_id = ? AND story_key = ? AND round_number = ?`).bind(roomId, storyId, roundNumber).first();
+    await publishRoomState(env.DB, roomId);
     return json({ ok: true, submittedCount: Number(count?.count) || 0 });
   }
   if (url.pathname === '/api/votes' && request.method === 'DELETE') {
@@ -1006,6 +1141,7 @@ async function handleApi(request, env) {
     await env.DB.prepare('DELETE FROM votes WHERE room_id = ? AND story_key = ? AND round_number = ?')
       .bind(roomId, storyId, roundNumber)
       .run();
+    await publishRoomState(env.DB, roomId);
     return json({ ok: true, submittedCount: 0 });
   }
   return json({ error: 'Not found' }, 404);
@@ -1024,6 +1160,8 @@ async function serveStatic(request, env) {
     ? 'text/html; charset=utf-8'
     : assetPath.endsWith('.css')
       ? 'text/css; charset=utf-8'
+      : assetPath.endsWith('.svg')
+        ? 'image/svg+xml'
       : 'application/javascript; charset=utf-8';
   return new Response(asset, {
     headers: {

@@ -215,6 +215,7 @@ let cloud = {
   room: localWorkspace.rooms.find((room) => room.id === activeRoomId) || localWorkspace.rooms[0] || defaultWorkspace.rooms[0],
   rooms: localWorkspace.rooms,
   teams: localWorkspace.teams,
+  directoryUsers: [],
   selectedTeamId: localWorkspace.teams[0]?.id || null,
   adminUsers: [],
   lastCreatedCredentials: null,
@@ -226,7 +227,8 @@ let cloud = {
 const siteRuntime = {
   enabled: window.location.hostname.endsWith('.chatgpt.site'),
   ready: false,
-  pollTimer: null,
+  eventSource: null,
+  realtimeRetryTimer: null,
   saveTimers: new Map(),
   saveChains: new Map(),
   saveInFlight: 0,
@@ -789,7 +791,7 @@ function renderTeamPage() {
   </section>
   <div class="team-layout">
     <section class="card team-directory-card"><div class="section-heading"><div><p class="section-kicker">Teams</p><h2>Your teams</h2></div><span class="section-count">${cloud.teams.length}</span></div><div class="team-list">${cloud.teams.length ? cloud.teams.map((team) => `<button class="team-list-row ${team.id === selectedTeam?.id ? 'active' : ''}" type="button" data-select-team="${escapeHTML(team.id)}"><span class="team-avatar">${escapeHTML(getInitials(team.name))}</span><span><strong>${escapeHTML(team.name)}</strong><small>${team.members?.length || team.memberCount || 0} ${(team.members?.length || team.memberCount || 0) === 1 ? 'person' : 'people'}</small></span>${icon('chevron')}</button>`).join('') : '<div class="empty-state compact"><h3>No teams yet</h3><p>Create one to reuse a group of people across rooms.</p></div>'}</div></section>
-    <section class="card team-detail-card">${selectedTeam ? `<div class="team-detail-header"><div><p class="section-kicker">Team roster</p><h2>${escapeHTML(selectedTeam.name)}</h2><p>Invite this team to <strong>${escapeHTML(getRoomName())}</strong> or share a link for people to join the team.</p></div><span class="team-detail-badge">${selectedTeam.role === 'owner' ? 'Owner' : 'Member'}</span></div><div class="team-actions"><button class="primary-button" type="button" data-invite-team-to-room="${escapeHTML(selectedTeam.id)}">${icon('share')}Invite team to room</button><button class="outline-button" type="button" data-invite-team="${escapeHTML(selectedTeam.id)}">${icon('link')}Add people with a link</button></div><div class="member-list"><div class="member-list-heading"><strong>People</strong><span>${selectedTeam.members?.length || selectedTeam.memberCount || 0} members</span></div>${(selectedTeam.members || []).map((member) => `<div class="member-row"><span class="avatar small-avatar">${escapeHTML(getInitials(member.name))}</span><span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.email || (member.role === 'owner' ? 'Team owner' : 'Team member'))}</small></span><span class="member-role">${member.role === 'owner' ? 'Owner' : 'Member'}</span></div>`).join('') || '<p class="empty-manager">No members yet. Share the team link to add the first person.</p>'}</div>` : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>Create your first team</h3><p>Teams make it easy to invite the same people into several planning rooms.</p></div>'}</section>
+    <section class="card team-detail-card">${selectedTeam ? `<div class="team-detail-header"><div><p class="section-kicker">Team roster</p><h2>${escapeHTML(selectedTeam.name)}</h2><p>Add existing Pointline members directly, or share a link for people who do not have access yet.</p></div><span class="team-detail-badge">${selectedTeam.role === 'owner' ? 'Owner' : 'Member'}</span></div><div class="team-actions">${selectedTeam.role === 'owner' || isAdmin() ? `<button class="primary-button" type="button" data-add-team-member="${escapeHTML(selectedTeam.id)}">${icon('plus')}Add member</button>` : ''}<button class="outline-button" type="button" data-invite-team-to-room="${escapeHTML(selectedTeam.id)}">${icon('share')}Invite team to room</button><button class="outline-button" type="button" data-invite-team="${escapeHTML(selectedTeam.id)}">${icon('link')}Add people with a link</button></div><div class="member-list"><div class="member-list-heading"><strong>People</strong><span>${selectedTeam.members?.length || selectedTeam.memberCount || 0} members</span></div>${(selectedTeam.members || []).map((member) => `<div class="member-row"><span class="avatar small-avatar">${escapeHTML(getInitials(member.name))}</span><span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.email || (member.role === 'owner' ? 'Team owner' : 'Team member'))}</small></span><span class="member-role">${member.role === 'owner' ? 'Owner' : 'Member'}</span></div>`).join('') || '<p class="empty-manager">No members yet. Add an existing member or share the team link.</p>'}</div>` : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>Create your first team</h3><p>Teams make it easy to invite the same people into several planning rooms.</p></div>'}</section>
   </div>`;
 }
 
@@ -1239,6 +1241,9 @@ function bindEvents() {
       render();
     });
   });
+  document.querySelectorAll('[data-add-team-member]').forEach((button) => {
+    button.addEventListener('click', () => openAddTeamMemberModal(button.dataset.addTeamMember));
+  });
   document.querySelectorAll('[data-invite-team]').forEach((button) => {
     button.addEventListener('click', () => openInviteLink(button.dataset.inviteTeam, 'team'));
   });
@@ -1428,13 +1433,15 @@ function normalizeTeamRecord(team) {
 async function refreshWorkspaceData() {
   if (!siteRuntime.ready) return;
   try {
-    const [roomsPayload, teamsPayload, adminPayload] = await Promise.all([
+    const [roomsPayload, teamsPayload, directoryPayload, adminPayload] = await Promise.all([
       siteRequest(roomScopedApiPath('/api/rooms')),
       siteRequest(roomScopedApiPath('/api/teams')),
+      siteRequest('/api/directory/users'),
       isAdmin() ? siteRequest('/api/admin/users') : Promise.resolve({ users: [] }),
     ]);
     cloud.rooms = Array.isArray(roomsPayload.rooms) ? roomsPayload.rooms.map(normalizeRoomRecord) : [];
     cloud.teams = Array.isArray(teamsPayload.teams) ? teamsPayload.teams.map(normalizeTeamRecord) : [];
+    cloud.directoryUsers = Array.isArray(directoryPayload.users) ? directoryPayload.users : [];
     cloud.adminUsers = Array.isArray(adminPayload.users) ? adminPayload.users : [];
     cloud.selectedTeamId = cloud.teams.some((team) => team.id === cloud.selectedTeamId) ? cloud.selectedTeamId : cloud.teams[0]?.id || null;
     if (!hasActiveEditor()) render();
@@ -1449,6 +1456,7 @@ async function selectRoom(roomId) {
   persistLocalState();
 
   if (siteRuntime.ready) {
+    stopSiteRealtime();
     try {
       const payload = await siteRequest(`/api/state?room=${encodeURIComponent(roomId)}`);
       activeRoomId = roomId;
@@ -1461,6 +1469,7 @@ async function selectRoom(roomId) {
       updateRoomUrl(roomId);
       activeView = 'estimates';
       render();
+      startSiteRealtime();
       showToast(`${room.name} is ready`);
     } catch (error) {
       showToast(error.message || 'This room is not available');
@@ -1612,6 +1621,57 @@ async function createTeamRecord(name) {
   showToast(`${name} created`);
 }
 
+async function addTeamMemberRecord(teamId, accountId) {
+  await siteRequest(`/api/teams/${encodeURIComponent(teamId)}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId }),
+  });
+  await refreshWorkspaceData();
+  render();
+  showToast('Member added to the team');
+}
+
+async function addRoomMemberRecord(accountId = null, teamId = null) {
+  const payload = await siteRequest(`/api/rooms/${encodeURIComponent(cloud.roomId)}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId, teamId }),
+  });
+  cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
+  await refreshWorkspaceData();
+  closeModal();
+  render();
+  showToast(teamId ? 'Team added to the room' : 'Member added to the room');
+}
+
+function openAddTeamMemberModal(teamId) {
+  const team = cloud.teams.find((candidate) => candidate.id === teamId);
+  const existingIds = new Set((team?.members || []).map((member) => member.id));
+  const options = cloud.directoryUsers
+    .filter((user) => !existingIds.has(user.id))
+    .map((user) => `<option value="${escapeHTML(user.id)}">${escapeHTML(user.name)}${user.username ? ` · @${escapeHTML(user.username)}` : ''}</option>`)
+    .join('');
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="add-team-member-title"><div class="modal-header"><div><p class="section-kicker">${escapeHTML(team?.name || 'Team')}</p><h2 id="add-team-member-title">Add a member</h2><p>Choose an existing Pointline account to add immediately.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-add-team-member-form><label class="modal-field"><span>Member</span><select class="modal-input" name="accountId" required ${options ? '' : 'disabled'}>${options || '<option value="">No available members</option>'}</select></label><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit" ${options ? '' : 'disabled'}>${icon('plus')}Add member</button></div></form></section></div>`;
+  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
+  document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeModal();
+  });
+  document.querySelector('[data-add-team-member-form]').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const accountId = String(new FormData(event.target).get('accountId') || '');
+    if (!accountId) return;
+    const submit = event.target.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      await addTeamMemberRecord(teamId, accountId);
+      closeModal();
+      render();
+    } catch (error) {
+      submit.disabled = false;
+      showToast(error.message || 'Member could not be added');
+    }
+  });
+}
+
 function openCreateTeamModal() {
   document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="create-team-title"><div class="modal-header"><div><p class="section-kicker">Reusable group</p><h2 id="create-team-title">Create a team</h2><p>Give the group a name, then share its link to add people.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><form class="modal-form" data-create-team-form><div class="modal-field"><label for="team-name">Team name</label><input id="team-name" class="modal-input" name="name" required maxlength="80" placeholder="e.g. Commerce squad" /></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Create team ${icon('plus')}</button></div></form></section></div>`;
   document.querySelector('#team-name').focus();
@@ -1676,7 +1736,11 @@ async function openInviteLink(teamId, kind) {
 
 function openShareModal() {
   const teamOptions = cloud.teams.length ? cloud.teams.map((team) => `<option value="${escapeHTML(team.id)}">${escapeHTML(team.name)} · ${team.members?.length || team.memberCount || 0} people</option>`).join('') : '<option value="">Create a team first</option>';
-  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="share-room-title"><div class="modal-header"><div><p class="section-kicker">${escapeHTML(getRoomName())}</p><h2 id="share-room-title">Invite people to this room</h2><p>Invite one person, or bring a reusable team into the room in one step.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><div class="share-option-list"><button class="share-option" type="button" data-create-person-invite><span class="share-option-icon">${icon('users')}</span><span><strong>Invite people</strong><small>Create a link for individual teammates to join this room.</small></span>${icon('chevron')}</button><div class="share-option share-option-team"><span class="share-option-icon">${icon('layers')}</span><span class="share-option-copy"><strong>Invite a team</strong><small>Everyone on the selected team can join this room.</small></span><select class="modal-input" data-invite-team-select aria-label="Team to invite">${teamOptions}</select><button class="primary-button compact-button" type="button" data-create-team-room-invite ${cloud.teams.length ? '' : 'disabled'}>Create link</button></div></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button></div></section></div>`;
+  const memberOptions = cloud.directoryUsers.length
+    ? cloud.directoryUsers.map((user) => `<option value="${escapeHTML(user.id)}">${escapeHTML(user.name)}${user.username ? ` · @${escapeHTML(user.username)}` : ''}</option>`).join('')
+    : '<option value="">No existing members found</option>';
+  const canManageRoom = getCurrentRoom()?.role === 'owner' || getCurrentRoom()?.role === 'admin' || isAdmin();
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="share-room-title"><div class="modal-header"><div><p class="section-kicker">${escapeHTML(getRoomName())}</p><h2 id="share-room-title">Add people to this room</h2><p>Add existing members instantly, or create a link for someone who does not have access yet.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">${icon('x')}</button></div><div class="share-option-list">${canManageRoom ? `<div class="share-option share-option-team"><span class="share-option-icon">${icon('users')}</span><span class="share-option-copy"><strong>Add a member directly</strong><small>Choose an existing Pointline account; no link is needed.</small></span><select class="modal-input" data-add-room-member-select aria-label="Member to add">${memberOptions}</select><button class="primary-button compact-button" type="button" data-add-room-member ${cloud.directoryUsers.length ? '' : 'disabled'}>Add now</button></div><div class="share-option share-option-team"><span class="share-option-icon">${icon('layers')}</span><span class="share-option-copy"><strong>Add a team directly</strong><small>Give everyone already on a team access to this room.</small></span><select class="modal-input" data-invite-team-select aria-label="Team to add">${teamOptions}</select><button class="primary-button compact-button" type="button" data-add-room-team ${cloud.teams.length ? '' : 'disabled'}>Add now</button></div>` : ''}<button class="share-option" type="button" data-create-person-invite><span class="share-option-icon">${icon('link')}</span><span><strong>Invite people with a link</strong><small>Create a link for individual teammates to join this room.</small></span>${icon('chevron')}</button><div class="share-option share-option-team"><span class="share-option-icon">${icon('share')}</span><span class="share-option-copy"><strong>Invite a team with a link</strong><small>Use a link when the team is not already in Pointline.</small></span><select class="modal-input" data-invite-team-select aria-label="Team to invite">${teamOptions}</select><button class="primary-button compact-button" type="button" data-create-team-room-invite ${cloud.teams.length ? '' : 'disabled'}>Create link</button></div></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button></div></section></div>`;
   document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
   document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
     if (event.target === event.currentTarget) closeModal();
@@ -1689,7 +1753,26 @@ function openShareModal() {
       showToast(error.message || 'Invite link could not be created');
     }
   });
-  document.querySelector('[data-create-team-room-invite]')?.addEventListener('click', () => openInviteLink(document.querySelector('[data-invite-team-select]').value, 'room-team'));
+  document.querySelector('[data-add-room-member]')?.addEventListener('click', async () => {
+    const accountId = document.querySelector('[data-add-room-member-select]').value;
+    try {
+      await addRoomMemberRecord(accountId, null);
+    } catch (error) {
+      showToast(error.message || 'Member could not be added to the room');
+    }
+  });
+  document.querySelector('[data-add-room-team]')?.addEventListener('click', async () => {
+    const teamId = document.querySelector('[data-invite-team-select]').value;
+    try {
+      await addRoomMemberRecord(null, teamId);
+    } catch (error) {
+      showToast(error.message || 'Team could not be added to the room');
+    }
+  });
+  document.querySelector('[data-create-team-room-invite]')?.addEventListener('click', () => {
+    const selects = document.querySelectorAll('[data-invite-team-select]');
+    openInviteLink(selects[selects.length - 1]?.value, 'room-team');
+  });
 }
 
 function selectStory(storyId) {
@@ -2029,10 +2112,7 @@ async function signOut() {
   } catch (error) {
     console.warn('Pointline sign out failed', error);
   }
-  if (siteRuntime.pollTimer) {
-    clearInterval(siteRuntime.pollTimer);
-    siteRuntime.pollTimer = null;
-  }
+  stopSiteRealtime();
   siteRuntime.ready = false;
   siteRuntime.saveTimers.forEach((timer) => clearTimeout(timer));
   siteRuntime.saveTimers.clear();
@@ -2046,10 +2126,7 @@ async function signOut() {
 
 function handleSessionExpired(error) {
   if (error.status !== 401 || !siteRuntime.enabled) return false;
-  if (siteRuntime.pollTimer) {
-    clearInterval(siteRuntime.pollTimer);
-    siteRuntime.pollTimer = null;
-  }
+  stopSiteRealtime();
   siteRuntime.ready = false;
   cloud.user = null;
   cloud.status = 'auth';
@@ -2214,9 +2291,55 @@ function applySiteState(remoteState) {
   return true;
 }
 
-function startSitePolling() {
-  if (siteRuntime.pollTimer) return;
-  siteRuntime.pollTimer = window.setInterval(() => refreshSiteState(), 2000);
+function stopSiteRealtime() {
+  siteRuntime.eventSource?.close();
+  siteRuntime.eventSource = null;
+  if (siteRuntime.realtimeRetryTimer) {
+    clearTimeout(siteRuntime.realtimeRetryTimer);
+    siteRuntime.realtimeRetryTimer = null;
+  }
+}
+
+function applyRealtimeState(payload) {
+  if (!siteRuntime.ready || !payload?.state || siteStateHasPendingChanges() || hasActiveEditor()) return;
+  cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
+  if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
+  if (!applySiteState(payload.state)) return;
+  rememberRemoteSiteState(payload);
+  persistLocalState();
+  cloud.status = 'synced';
+  updateCloudStatusBadge();
+  render();
+}
+
+function startSiteRealtime() {
+  if (!siteRuntime.ready || !window.EventSource) return;
+  stopSiteRealtime();
+  const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
+  const source = new EventSource(`/api/state/stream${roomId}`);
+  siteRuntime.eventSource = source;
+  source.addEventListener('open', () => {
+    cloud.status = 'synced';
+    updateCloudStatusBadge();
+  });
+  source.addEventListener('state', (event) => {
+    try {
+      applyRealtimeState(JSON.parse(event.data));
+    } catch (error) {
+      console.warn('Pointline realtime state message was invalid', error);
+    }
+  });
+  source.addEventListener('error', () => {
+    if (siteRuntime.eventSource !== source) return;
+    cloud.status = 'connecting';
+    updateCloudStatusBadge();
+    if (!siteRuntime.realtimeRetryTimer) {
+      siteRuntime.realtimeRetryTimer = window.setTimeout(async () => {
+        siteRuntime.realtimeRetryTimer = null;
+        await refreshSiteState({ renderAfter: false });
+      }, 15000);
+    }
+  });
 }
 
 function hasActiveEditor() {
@@ -2426,7 +2549,7 @@ async function loadAuthenticatedSiteSession() {
     cloud.status = 'synced';
     render();
     await refreshWorkspaceData();
-    startSitePolling();
+    startSiteRealtime();
   } catch (error) {
     throw error;
   }
