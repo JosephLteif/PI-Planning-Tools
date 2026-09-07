@@ -1499,7 +1499,18 @@ function bindEvents() {
   hydrateIcons();
   document.querySelector('[data-login-form]')?.addEventListener('submit', loginWithPassword);
   document.querySelector('[data-admin-user-form]')?.addEventListener('submit', createUserFromAdmin);
-  document.querySelectorAll('[data-edit-admin-user]').forEach((button) => button.addEventListener('click', () => openEditUserModal(button.dataset.editAdminUser)));
+  document.querySelectorAll('[data-edit-admin-user]').forEach((button) => {
+    button.addEventListener('click', () => openEditUserModal(button.dataset.editAdminUser));
+    if (activeView === 'admin' && button.dataset.editAdminUser !== cloud.user?.id) {
+      const remove = document.createElement('button');
+      remove.className = 'outline-button compact-button danger-outline';
+      remove.type = 'button';
+      remove.dataset.deleteAdminUser = button.dataset.editAdminUser;
+      remove.textContent = 'Remove';
+      button.after(remove);
+    }
+  });
+  document.querySelectorAll('[data-delete-admin-user]').forEach((button) => button.addEventListener('click', () => deleteUserFromAdmin(button.dataset.deleteAdminUser)));
   document.querySelector('[data-copy-credentials]')?.addEventListener('click', (event) => copyText(event.currentTarget.dataset.copyCredentials, 'Credentials copied'));
 
   document.querySelectorAll('[data-nav]').forEach((button) => {
@@ -2637,6 +2648,20 @@ async function updateUserFromAdmin(event) {
   } catch (error) {
     submit.disabled = false;
     showToast(error.message || 'User could not be updated');
+  }
+}
+
+async function deleteUserFromAdmin(userId) {
+  const user = cloud.adminUsers.find((candidate) => candidate.id === userId);
+  if (!user || user.id === cloud.user?.id) return;
+  if (!window.confirm('Remove ' + user.name + ' permanently? This deletes the account and its room memberships.')) return;
+  try {
+    await siteRequest('/api/admin/users/' + encodeURIComponent(userId), { method: 'DELETE' });
+    cloud.adminUsers = cloud.adminUsers.filter((candidate) => candidate.id !== userId);
+    render();
+    showToast(user.name + ' was removed');
+  } catch (error) {
+    showToast(error.message || 'User could not be removed');
   }
 }
 

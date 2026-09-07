@@ -3576,6 +3576,11 @@ h1 {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
   gap: 18px;
   margin-bottom: 18px;
+  align-items: start;
+}
+
+.capacity-layout > .card {
+  align-self: start;
 }
 
 .capacity-default-grid,

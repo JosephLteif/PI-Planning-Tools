@@ -485,6 +485,15 @@ async function updateManagedUser(db, user, accountId, input) {
   };
 }
 
+async function deleteManagedUser(db, user, accountId) {
+  requireAdmin(user);
+  const target = await db.prepare('SELECT id FROM accounts WHERE id = ? LIMIT 1').bind(accountId).first();
+  if (!target) throw authError('User not found', 404);
+  if (target.id === user.id) throw authError('You cannot remove your own admin account', 400);
+  await db.prepare('DELETE FROM accounts WHERE id = ?').bind(accountId).run();
+  return { accountId };
+}
+
 async function requireMember(db, roomId, user) {
   if (user?.role === 'admin') {
     const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
@@ -1239,6 +1248,11 @@ async function handleApi(request, env) {
     return json({ ok: true, ...result }, 201);
   }
   const adminUserPathMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+  if (adminUserPathMatch && request.method === 'DELETE') {
+    const accountId = decodeURIComponent(adminUserPathMatch[1]);
+    const result = await deleteManagedUser(env.DB, user, accountId);
+    return json({ ok: true, ...result });
+  }
   if (adminUserPathMatch && (request.method === 'PUT' || request.method === 'PATCH')) {
     const accountId = decodeURIComponent(adminUserPathMatch[1]);
     const result = await updateManagedUser(env.DB, user, accountId, await readJson(request));
