@@ -370,12 +370,13 @@ function defaultCapacityState() {
 function normalizeCapacityState(capacity, roster = []) {
   const source = capacity && typeof capacity === 'object' ? capacity : {};
   const sourceDefaults = source.defaults && typeof source.defaults === 'object' ? source.defaults : {};
+  const rosterIds = new Set(roster.map((member) => String(member?.id || '').trim()).filter(Boolean));
   const members = Array.isArray(source.members) ? source.members.map((member) => ({
     id: String(member?.id || member?.accountId || '').trim(),
     name: String(member?.name || 'Planner').trim() || 'Planner',
     office: member?.office === 'cyprus' ? 'cyprus' : 'beirut',
     trainStaffDevCapacityPct: clampCapacityPercent(member?.trainStaffDevCapacityPct, 0.75),
-  })).filter((member) => member.id) : [];
+  })).filter((member) => member.id && (!rosterIds.size || rosterIds.has(member.id))) : [];
   const knownIds = new Set(members.map((member) => member.id));
   roster.forEach((member) => {
     const id = String(member?.id || '').trim();
