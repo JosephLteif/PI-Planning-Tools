@@ -355,6 +355,7 @@ button {
   color: var(--ink);
   background: #fff;
   border: 1px solid var(--line-strong);
+  text-decoration: none;
 }
 
 .outline-button:hover {

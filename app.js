@@ -1,7 +1,6 @@
 const STORAGE_KEY = 'pointline-pi-room-v1';
 const PARTICIPANT_ID_KEY = 'pointline-participant-id-v1';
 const ROOM_ID_KEY = 'pointline-room-id-v1';
-const SUPABASE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.115.0/+esm';
 
 const sequences = {
   sequential: {
@@ -149,14 +148,18 @@ let state = loadState();
 let toastTimer;
 let importDraft = { mode: 'text', text: '', fileName: '' };
 let cloud = {
-  client: null,
   user: null,
   roomId: null,
-  channel: null,
   status: 'local',
-  memberCount: 6,
+  memberCount: 1,
+};
+
+const siteRuntime = {
+  enabled: window.location.hostname.endsWith('.chatgpt.site'),
+  ready: false,
+  pollTimer: null,
   saveTimer: null,
-  loading: false,
+  refreshing: false,
 };
 
 const participantId = getOrCreateParticipantId();
@@ -265,7 +268,7 @@ function normalizeEstimate(value) {
 
 function saveState() {
   persistLocalState();
-  queueCloudSync();
+  queueSiteCloudSync();
 }
 
 function persistLocalState() {
@@ -304,7 +307,6 @@ function icon(name, className = '') {
     flip: '<path d="M17 4h3v3M7 20H4v-3M20 7a8 8 0 0 0-14-2M4 17a8 8 0 0 0 14 2"/>',
     layers: '<path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/>',
     cloud: '<path d="M7.5 18h9a4.5 4.5 0 0 0 .8-8.9A5.5 5.5 0 0 0 6.7 8.3 4 4 0 0 0 7.5 18Z"/>',
-    google: '<path d="M21.8 12.2c0-.7-.1-1.5-.2-2.2H12v4.2h5.5a4.7 4.7 0 0 1-2 3.1v2.6h3.3c1.9-1.8 3-4.4 3-7.7Z"/><path d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.6c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.2H3v2.7A10 10 0 0 0 12 22Z"/><path d="M6.4 13.7a6 6 0 0 1 0-3.5V7.5H3a10 10 0 0 0 0 9l3.4-2.8Z"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9C17 2.9 14.7 2 12 2a10 10 0 0 0-9 5.5l3.4 2.7C7.2 7.8 9.4 6 12 6Z"/>',
     play: '<path d="m8 5 11 7-11 7V5Z"/>',
   };
 
@@ -320,25 +322,15 @@ function formatScore(score) {
   return Number.isInteger(score) ? String(score) : score.toFixed(1).replace(/\.0$/, '');
 }
 
-function getSupabaseConfig() {
-  return globalThis.POINTLINE_SUPABASE_CONFIG || {};
-}
-
-function cloudIsConfigured() {
-  const config = getSupabaseConfig();
-  return Boolean(config.url && config.publishableKey);
-}
-
 function getConfiguredRoomId() {
-  const config = getSupabaseConfig();
   const urlRoomId = new URLSearchParams(window.location.search).get('room');
-  const candidate = config.roomId || urlRoomId || localStorage.getItem(ROOM_ID_KEY) || '';
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate) ? candidate : null;
+  const candidate = urlRoomId || localStorage.getItem(ROOM_ID_KEY) || '';
+  return /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(candidate) ? candidate : null;
 }
 
 function getUserName(user = cloud.user) {
   if (!user) return 'Jordan L.';
-  return user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Planner';
+  return user.name || user.full_name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Planner';
 }
 
 function getInitials(name) {
@@ -361,7 +353,7 @@ function getRoundVoteCount() {
 }
 
 function getOwnVote() {
-  return normalizeVote(state.round.votes?.[participantId]);
+  return normalizeVote(state.round.votes?.[cloud.user?.id || participantId]);
 }
 
 function getService(serviceId) {
@@ -423,12 +415,15 @@ function renderAuthAction() {
   if (cloud.user) {
     return `<button class="profile-button" type="button" data-auth-action="signout" title="Sign out ${escapeHTML(getUserName())}"><span class="avatar">${escapeHTML(getInitials(getUserName()))}</span><span class="profile-name">${escapeHTML(getUserName())}</span></button>`;
   }
-  return `<button class="outline-button auth-button" type="button" data-auth-action="signin">${icon('google')}Sign in with Google</button>`;
+  return siteRuntime.enabled
+    ? `<a class="outline-button auth-button" href="/signin-with-chatgpt" data-auth-action="signin">${icon('users')}Sign in with ChatGPT</a>`
+    : `<button class="outline-button auth-button" type="button" data-auth-action="signin">${icon('users')}Sign in with ChatGPT</button>`;
 }
 
 function renderCloudStatus() {
   if (cloud.status === 'synced') return `${icon('cloud')} Synced to cloud`;
   if (cloud.status === 'connecting') return `${icon('cloud')} Connecting…`;
+  if (cloud.status === 'auth') return `${icon('users')} Sign in to sync your account`;
   if (cloud.status === 'error') return `${icon('info')} Cloud setup needed`;
   return `${icon('clock')} Local demo · browser saved`;
 }
@@ -470,7 +465,7 @@ function renderVoteResults(entries) {
   const minimum = manualVotes.length ? Math.min(...manualVotes) : null;
   const maximum = manualVotes.length ? Math.max(...manualVotes) : null;
   const spread = minimum === null ? null : maximum - minimum;
-  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Average</span><strong>${formatScore(average)}</strong></div><div><span>Range</span><strong>${formatScore(minimum)}–${formatScore(maximum)}</strong></div><div><span>Spread</span><strong>${formatScore(spread)}</strong></div></div><div class="vote-result-list">${entries.map((vote, index) => `<div class="vote-result-row"><span>${vote.id === participantId ? 'You' : `Voter ${index + 1}`}</span><span class="score-pill manual">${formatScore(vote.manual)}</span><span class="score-pill ai">${formatScore(vote.ai)}</span></div>`).join('')}</div><p class="vote-result-note">Use the final estimate fields above to record the agreed team value. AI votes are shown only as a comparison.</p></div>`;
+  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Average</span><strong>${formatScore(average)}</strong></div><div><span>Range</span><strong>${formatScore(minimum)}–${formatScore(maximum)}</strong></div><div><span>Spread</span><strong>${formatScore(spread)}</strong></div></div><div class="vote-result-list">${entries.map((vote, index) => `<div class="vote-result-row"><span>${vote.id === (cloud.user?.id || participantId) ? 'You' : `Voter ${index + 1}`}</span><span class="score-pill manual">${formatScore(vote.manual)}</span><span class="score-pill ai">${formatScore(vote.ai)}</span></div>`).join('')}</div><p class="vote-result-note">Use the final estimate fields above to record the agreed team value. AI votes are shown only as a comparison.</p></div>`;
 }
 
 function renderVotePanel(story) {
@@ -922,9 +917,9 @@ function bindEvents() {
     const vote = getOwnVote();
     vote.aiEnabled = event.target.checked;
     if (!vote.aiEnabled) vote.ai = null;
-    state.round.votes[participantId] = vote;
+    state.round.votes[cloud.user?.id || participantId] = vote;
     saveState();
-    syncCloudVote();
+    syncSiteVote();
     render();
   });
 
@@ -942,9 +937,14 @@ function bindEvents() {
   document.querySelectorAll('[data-breakdown]').forEach((button) => {
     button.addEventListener('click', () => setBreakdown(button.dataset.breakdown));
   });
-  document.querySelector('[data-auth-action]')?.addEventListener('click', () => {
-    if (cloud.user) signOut();
-    else signInWithGoogle();
+  document.querySelector('[data-auth-action]')?.addEventListener('click', (event) => {
+    if (cloud.user) {
+      event.preventDefault();
+      signOut();
+    } else if (!siteRuntime.enabled) {
+      event.preventDefault();
+      signInWithChatGPT();
+    }
   });
 }
 
@@ -989,9 +989,9 @@ function updateVote(type, value) {
   const vote = getOwnVote();
   vote[type] = normalizeEstimate(value);
   if (type === 'ai') vote.aiEnabled = true;
-  state.round.votes[participantId] = vote;
+  state.round.votes[cloud.user?.id || participantId] = vote;
   saveState();
-  syncCloudVote();
+  syncSiteVote();
   render();
 }
 
@@ -1022,8 +1022,6 @@ function revealVotes() {
   state.round.cardFlipped = false;
   state.round.revealedAt = new Date().toISOString();
   saveState();
-  syncCloudRound();
-  refreshCloudVotes();
   render();
   showToast('Votes revealed to the room');
 }
@@ -1035,7 +1033,7 @@ function clearVotes() {
   state.round.submittedCount = 0;
   state.round.revealedAt = null;
   saveState();
-  clearCloudVotes();
+  clearSiteVotes();
   render();
   showToast('Votes cleared — the round is ready again');
 }
@@ -1043,8 +1041,7 @@ function clearVotes() {
 function resetRound() {
   state.round = makeRound(state.selectedStoryId, state.round.mode, state.round.roundNumber + 1);
   saveState();
-  clearCloudVotes();
-  syncCloudRound();
+  clearSiteVotes();
   render();
   showToast('New voting round ready');
 }
@@ -1069,7 +1066,6 @@ function updateStoryService(previousServiceId, serviceId) {
   const links = normalizeServiceLinks(story.serviceLinks);
   if (!serviceId || links.some((link) => link.serviceId === serviceId && link.serviceId !== previousServiceId)) return;
   story.serviceLinks = links.map((link) => link.serviceId === previousServiceId ? { ...link, serviceId } : link);
-  if (previousServiceId !== serviceId) deleteCloudAllocation(story.id, previousServiceId);
   saveState();
   render();
 }
@@ -1088,7 +1084,6 @@ function updateStoryServiceAllocation(serviceId, value) {
 function removeStoryService(serviceId) {
   const story = getSelectedStory();
   story.serviceLinks = normalizeServiceLinks(story.serviceLinks).filter((link) => link.serviceId !== serviceId);
-  deleteCloudAllocation(story.id, serviceId);
   saveState();
   render();
 }
@@ -1120,325 +1115,200 @@ function updateCloudStatusBadge() {
   if (badge) badge.innerHTML = renderCloudStatus();
 }
 
-function queueCloudSync() {
-  if (!cloud.client || !cloud.user || !cloud.roomId || cloud.loading) return;
-  clearTimeout(cloud.saveTimer);
-  cloud.saveTimer = setTimeout(() => {
-    syncCloudState();
+function signInWithChatGPT() {
+  if (siteRuntime.enabled) {
+    window.location.assign('/signin-with-chatgpt');
+    return;
+  }
+  showToast('ChatGPT sign-in is available from the hosted Pointline Site');
+}
+
+function signOut() {
+  if (siteRuntime.enabled) {
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(`/signout-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
+    return;
+  }
+  showToast('ChatGPT sign-out is available from the hosted Pointline Site');
+}
+
+async function siteRequest(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set('Accept', 'application/json');
+  if (options.body) headers.set('Content-Type', 'application/json');
+  const response = await fetch(path, { ...options, headers, credentials: 'same-origin' });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `Pointline request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function getVoteIdentity() {
+  return cloud.user?.id || participantId;
+}
+
+function siteStatePayload() {
+  const snapshot = JSON.parse(JSON.stringify(state));
+  snapshot.round = { ...snapshot.round, votes: {} };
+  return snapshot;
+}
+
+function applySiteState(remoteState) {
+  if (!remoteState || !Array.isArray(remoteState.stories) || !remoteState.stories.length) return false;
+  const hasResourceModel = remoteState.resourceModelVersion === 1;
+  const stories = remoteState.stories.map((story) => ({
+    ...story,
+    id: String(story.id || '').trim(),
+    type: String(story.type || 'Feature').trim() || 'Feature',
+    title: String(story.title || '').trim() || 'Untitled story',
+    description: String(story.description || '').trim() || 'A new story ready for the team to shape and estimate together.',
+    acceptance: Array.isArray(story.acceptance) && story.acceptance.length ? story.acceptance.map((item) => String(item)) : ['Ready for discussion'],
+    manual: normalizeEstimate(story.manual),
+    ai: normalizeEstimate(story.ai),
+    aiEnabled: story.aiEnabled === true || normalizeEstimate(story.ai) !== null,
+    saved: story.saved === true,
+    serviceLinks: Array.isArray(story.serviceLinks) && (hasResourceModel || story.serviceLinks.length)
+      ? normalizeServiceLinks(story.serviceLinks)
+      : [],
+  })).filter((story) => story.id && story.title);
+  if (!stories.length) return false;
+
+  const selectedStoryId = stories.some((story) => story.id === remoteState.selectedStoryId)
+    ? remoteState.selectedStoryId
+    : stories[0].id;
+  state = {
+    resourceModelVersion: 1,
+    sequence: sequences[remoteState.sequence] ? remoteState.sequence : defaultState.sequence,
+    selectedStoryId,
+    stories,
+    domains: Array.isArray(remoteState.domains) && remoteState.domains.length
+      ? remoteState.domains.map((domain) => ({ id: String(domain.id), name: String(domain.name).trim() })).filter((domain) => domain.name)
+      : structuredClone(defaultDomains),
+    services: Array.isArray(remoteState.services) && remoteState.services.length
+      ? remoteState.services.map((service) => ({ id: String(service.id), name: String(service.name).trim(), domainId: service.domainId ? String(service.domainId) : '' })).filter((service) => service.name)
+      : structuredClone(defaultServices),
+    round: normalizeRound(remoteState.round, selectedStoryId),
+  };
+  return true;
+}
+
+function startSitePolling() {
+  if (siteRuntime.pollTimer) return;
+  siteRuntime.pollTimer = window.setInterval(() => refreshSiteState(), 2000);
+}
+
+async function refreshSiteState({ renderAfter = true } = {}) {
+  if (!siteRuntime.ready || siteRuntime.refreshing) return;
+  siteRuntime.refreshing = true;
+  try {
+    const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
+    const payload = await siteRequest(`/api/state${roomId}`);
+    cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
+    if (applySiteState(payload.state)) persistLocalState();
+    cloud.status = 'synced';
+    if (renderAfter) render();
+    else updateCloudStatusBadge();
+  } catch (error) {
+    cloud.status = error.status === 401 ? 'auth' : 'error';
+    updateCloudStatusBadge();
+    if (error.status !== 401) console.warn('Pointline Site state refresh failed', error);
+  } finally {
+    siteRuntime.refreshing = false;
+  }
+}
+
+function queueSiteCloudSync() {
+  if (!siteRuntime.enabled || !siteRuntime.ready) return;
+  clearTimeout(siteRuntime.saveTimer);
+  siteRuntime.saveTimer = window.setTimeout(async () => {
+    try {
+      await siteRequest('/api/state', { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      cloud.status = 'synced';
+      updateCloudStatusBadge();
+    } catch (error) {
+      cloud.status = error.status === 401 ? 'auth' : 'error';
+      updateCloudStatusBadge();
+      console.warn('Pointline Site state save failed', error);
+    }
   }, 250);
 }
 
-function cloudStoryRows(roomId) {
-  return state.stories.map((story, index) => ({
-    room_id: roomId,
-    story_key: story.id,
-    type: story.type,
-    title: story.title,
-    description: story.description,
-    acceptance: story.acceptance,
-    sort_order: index,
-    manual_estimate: story.manual,
-    ai_estimate: story.ai,
-    ai_enabled: story.aiEnabled === true,
-    saved: story.saved === true,
-  }));
-}
-
-function cloudAllocationRows(roomId) {
-  return state.stories.flatMap((story) => normalizeServiceLinks(story.serviceLinks).map((link) => ({
-    room_id: roomId,
-    story_key: story.id,
-    service_id: link.serviceId,
-    allocation_pct: link.allocation,
-  })));
-}
-
-async function syncCloudState() {
-  if (!cloud.client || !cloud.user || !cloud.roomId) return;
-  const roomId = cloud.roomId;
-  try {
-    const roomUpdate = await cloud.client.from('rooms').update({
-      sequence_key: state.sequence,
-      selected_story_key: state.selectedStoryId,
-      vote_mode: state.round.mode,
-    }).eq('id', roomId);
-    if (roomUpdate.error) throw roomUpdate.error;
-
-    if (state.domains.length) {
-      const domains = await cloud.client.from('domains').upsert(
-        state.domains.map((domain, index) => ({ room_id: roomId, id: domain.id, name: domain.name, sort_order: index })),
-        { onConflict: 'room_id,id' },
-      );
-      if (domains.error) throw domains.error;
-    }
-    const [services, stories] = await Promise.all([
-      state.services.length
-        ? cloud.client.from('services').upsert(
-          state.services.map((service, index) => ({ room_id: roomId, id: service.id, name: service.name, domain_id: service.domainId || null, sort_order: index, active: true })),
-          { onConflict: 'room_id,id' },
-        )
-        : Promise.resolve({ error: null }),
-      cloud.client.from('stories').upsert(cloudStoryRows(roomId), { onConflict: 'room_id,story_key' }),
-    ]);
-    if (services.error) throw services.error;
-    if (stories.error) throw stories.error;
-    const allocations = cloudAllocationRows(roomId);
-    if (allocations.length) {
-      const allocationWrite = await cloud.client.from('story_service_allocations').upsert(
-        allocations,
-        { onConflict: 'room_id,story_key,service_id' },
-      );
-      if (allocationWrite.error) throw allocationWrite.error;
-    }
-    await syncCloudRound();
-    cloud.status = 'synced';
-    updateCloudStatusBadge();
-  } catch (error) {
-    cloud.status = 'error';
-    updateCloudStatusBadge();
-    console.warn('Pointline cloud sync failed', error);
-  }
-}
-
-async function deleteCloudAllocation(storyKey, serviceId) {
-  if (!cloud.client || !cloud.user || !cloud.roomId) return;
-  const result = await cloud.client.from('story_service_allocations').delete().eq('room_id', cloud.roomId).eq('story_key', storyKey).eq('service_id', serviceId);
-  if (result.error) console.warn('Pointline allocation delete failed', result.error);
-}
-
-async function syncCloudRound() {
-  if (!cloud.client || !cloud.user || !cloud.roomId) return;
-  const round = state.round;
-  const result = await cloud.client.from('planning_rounds').upsert({
-    room_id: cloud.roomId,
-    story_key: round.storyId,
-    round_number: round.roundNumber,
-    phase: round.phase,
-    mode: round.mode,
-    revealed_at: round.revealedAt,
-  }, { onConflict: 'room_id,story_key,round_number' });
-  if (result.error) {
-    cloud.status = 'error';
-    updateCloudStatusBadge();
-    console.warn('Pointline round sync failed', result.error);
-  }
-}
-
-async function syncCloudVote() {
-  if (!cloud.client || !cloud.user || !cloud.roomId || state.round.phase !== 'voting') return;
+async function syncSiteVote(retry = 0) {
+  if (!siteRuntime.ready || state.round.phase !== 'voting') return;
   const vote = getOwnVote();
-  const query = cloud.client.from('votes');
-  const result = vote.manual === null && vote.ai === null
-    ? await query.delete().eq('room_id', cloud.roomId).eq('story_key', state.round.storyId).eq('round_number', state.round.roundNumber).eq('user_id', cloud.user.id)
-    : await query.upsert({
-      room_id: cloud.roomId,
-      story_key: state.round.storyId,
-      round_number: state.round.roundNumber,
-      user_id: cloud.user.id,
-      manual_estimate: vote.manual,
-      ai_estimate: vote.ai,
-      ai_enabled: vote.aiEnabled,
-    }, { onConflict: 'room_id,story_key,round_number,user_id' });
-  if (!result.error) {
-    state.round.submittedCount = Math.max(state.round.submittedCount || 0, getRoundVotes().length);
-    persistLocalState();
-  }
-  if (result.error) console.warn('Pointline vote sync failed', result.error);
-}
-
-async function clearCloudVotes() {
-  if (!cloud.client || !cloud.user || !cloud.roomId) return;
-  const result = await cloud.client.from('votes').delete().eq('room_id', cloud.roomId).eq('story_key', state.round.storyId).eq('round_number', state.round.roundNumber);
-  if (result.error) console.warn('Pointline vote clear failed', result.error);
-}
-
-async function refreshCloudVotes() {
-  if (!cloud.client || !cloud.user || !cloud.roomId) return;
-  const result = await cloud.client.from('votes').select('user_id,manual_estimate,ai_estimate,ai_enabled').eq('room_id', cloud.roomId).eq('story_key', state.round.storyId).eq('round_number', state.round.roundNumber);
-  if (result.error) {
-    console.warn('Pointline vote refresh failed', result.error);
-    return;
-  }
-  state.round.votes = Object.fromEntries((result.data || []).map((vote) => [vote.user_id, {
-    manual: normalizeEstimate(vote.manual_estimate),
-    ai: normalizeEstimate(vote.ai_estimate),
-    aiEnabled: vote.ai_enabled === true,
-  }]));
-  if (state.round.phase === 'revealed' || state.round.mode === 'open') state.round.submittedCount = result.data?.length || 0;
-  else state.round.submittedCount = Math.max(state.round.submittedCount || 0, result.data?.length || 0);
-  persistLocalState();
-  render();
-}
-
-async function ensureCloudRoom() {
-  if (cloud.roomId) {
-    const joined = await cloud.client.rpc('join_room', { p_room_id: cloud.roomId });
-    if (joined.error) throw joined.error;
-    return cloud.roomId;
-  }
-  const result = await cloud.client.rpc('create_room', {
-    p_name: 'Commerce platform',
-    p_pi_label: 'PI 24',
-    p_sequence_key: state.sequence,
-  });
-  if (result.error) throw result.error;
-  const row = Array.isArray(result.data) ? result.data[0] : result.data;
-  const roomId = typeof row === 'string' ? row : row?.id;
-  if (!roomId) throw new Error('The create_room function did not return a room id');
-  cloud.roomId = roomId;
-  localStorage.setItem(ROOM_ID_KEY, roomId);
-  return roomId;
-}
-
-async function loadCloudState() {
-  if (!cloud.client || !cloud.user || !cloud.roomId || cloud.loading) return;
-  cloud.loading = true;
   try {
-    const roomQuery = cloud.client.from('rooms').select('sequence_key,selected_story_key,vote_mode').eq('id', cloud.roomId).maybeSingle();
-    const domainQuery = cloud.client.from('domains').select('id,name,sort_order').eq('room_id', cloud.roomId).order('sort_order');
-    const serviceQuery = cloud.client.from('services').select('id,name,domain_id,sort_order').eq('room_id', cloud.roomId).order('sort_order');
-    const storyQuery = cloud.client.from('stories').select('story_key,type,title,description,acceptance,sort_order,manual_estimate,ai_estimate,ai_enabled,saved').eq('room_id', cloud.roomId).order('sort_order');
-    const allocationQuery = cloud.client.from('story_service_allocations').select('story_key,service_id,allocation_pct').eq('room_id', cloud.roomId);
-    const memberQuery = cloud.client.from('room_members').select('user_id').eq('room_id', cloud.roomId);
-    const roundQuery = cloud.client.from('planning_rounds').select('story_key,round_number,phase,mode,submitted_count,revealed_at').eq('room_id', cloud.roomId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
-    const [room, members, domains, services, stories, allocations, round] = await Promise.all([roomQuery, memberQuery, domainQuery, serviceQuery, storyQuery, allocationQuery, roundQuery]);
-    const failed = [room, members, domains, services, stories, allocations, round].find((result) => result.error);
-    if (failed) throw failed.error;
-
-    const remoteStories = stories.data || [];
-    const remoteDomains = domains.data || [];
-    const remoteServices = services.data || [];
-    const remoteAllocations = allocations.data || [];
-    cloud.memberCount = Math.max(1, members.data?.length || 0);
-    if (remoteDomains.length) state.domains = remoteDomains.map((domain) => ({ id: domain.id, name: domain.name }));
-    if (remoteServices.length) state.services = remoteServices.map((service) => ({ id: service.id, name: service.name, domainId: service.domain_id || '' }));
-    if (remoteStories.length) {
-      state.stories = remoteStories.map((story) => ({
-        id: story.story_key,
-        type: story.type || 'Feature',
-        title: story.title,
-        description: story.description || 'A new story ready for the team to shape and estimate together.',
-        acceptance: Array.isArray(story.acceptance) && story.acceptance.length ? story.acceptance : ['Ready for discussion'],
-        manual: normalizeEstimate(story.manual_estimate),
-        ai: normalizeEstimate(story.ai_estimate),
-        aiEnabled: story.ai_enabled === true,
-        saved: story.saved === true,
-        serviceLinks: remoteAllocations.filter((link) => link.story_key === story.story_key).map((link) => ({ serviceId: link.service_id, allocation: Number(link.allocation_pct) || 0 })),
-      }));
-    }
-    const remoteSelected = room.data?.selected_story_key;
-    state.selectedStoryId = state.stories.some((story) => story.id === remoteSelected) ? remoteSelected : state.stories[0]?.id || state.selectedStoryId;
-    const remoteRound = round.data;
-    state.round = remoteRound
-      ? normalizeRound({ phase: remoteRound.phase, mode: remoteRound.mode, storyId: remoteRound.story_key, roundNumber: remoteRound.round_number, submittedCount: remoteRound.submitted_count, revealedAt: remoteRound.revealed_at }, state.selectedStoryId)
-      : makeRound(state.selectedStoryId, room.data?.vote_mode || 'hidden');
-    if (room.data?.sequence_key && sequences[room.data.sequence_key]) state.sequence = room.data.sequence_key;
-    if (state.round.storyId !== state.selectedStoryId && state.round.phase !== 'voting') state.round = makeRound(state.selectedStoryId, state.round.mode, state.round.roundNumber + 1);
+    const payload = await siteRequest('/api/vote', {
+      method: 'PUT',
+      body: JSON.stringify({
+        storyId: state.round.storyId,
+        roundNumber: state.round.roundNumber,
+        manual: vote.manual,
+        ai: vote.ai,
+        aiEnabled: vote.aiEnabled,
+      }),
+    });
+    state.round.votes[getVoteIdentity()] = vote;
+    state.round.submittedCount = Math.max(Number(payload.submittedCount) || 0, getRoundVotes().length);
     persistLocalState();
-    await refreshCloudVotes();
-    cloud.status = 'synced';
-    updateCloudStatusBadge();
-    if (!remoteStories.length) await syncCloudState();
   } catch (error) {
-    cloud.status = 'error';
+    if (error.status === 409 && retry === 0) {
+      window.setTimeout(() => syncSiteVote(1), 400);
+      return;
+    }
+    cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
-    console.warn('Pointline cloud load failed', error);
-  } finally {
-    cloud.loading = false;
+    console.warn('Pointline Site vote sync failed', error);
   }
 }
 
-function subscribeToCloudRoom() {
-  if (!cloud.client || !cloud.roomId || cloud.channel) return;
-  const reload = () => loadCloudState();
-  cloud.channel = cloud.client.channel(`pointline-room-${cloud.roomId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${cloud.roomId}` }, reload)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'stories', filter: `room_id=eq.${cloud.roomId}` }, reload)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'services', filter: `room_id=eq.${cloud.roomId}` }, reload)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'domains', filter: `room_id=eq.${cloud.roomId}` }, reload)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_rounds', filter: `room_id=eq.${cloud.roomId}` }, reload)
-    .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') console.warn('Pointline realtime subscription failed');
+async function clearSiteVotes() {
+  if (!siteRuntime.ready) return;
+  try {
+    await siteRequest('/api/votes', {
+      method: 'DELETE',
+      body: JSON.stringify({ storyId: state.round.storyId, roundNumber: state.round.roundNumber }),
     });
+  } catch (error) {
+    cloud.status = error.status === 401 ? 'auth' : 'error';
+    updateCloudStatusBadge();
+    console.warn('Pointline Site vote clear failed', error);
+  }
 }
 
-async function applyCloudSession(session) {
-  const nextUser = session?.user || null;
-  const nextUserId = nextUser?.id || null;
-  const currentUserId = cloud.user?.id || null;
-  cloud.user = nextUser;
-  if (!nextUser) {
-    cloud.status = 'local';
-    cloud.roomId = getConfiguredRoomId();
-    if (cloud.channel && cloud.client) await cloud.client.removeChannel(cloud.channel);
-    cloud.channel = null;
+async function initializeSitesBackend() {
+  if (!siteRuntime.enabled) return;
+  cloud.status = 'connecting';
+  updateCloudStatusBadge();
+  render();
+  try {
+    const me = await siteRequest('/api/me');
+    cloud.user = me.user || null;
+    cloud.roomId = me.roomId || null;
+    cloud.memberCount = Math.max(1, Number(me.memberCount) || 1);
+    if (cloud.roomId) localStorage.setItem(ROOM_ID_KEY, cloud.roomId);
+
+    const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
+    const payload = await siteRequest(`/api/state${roomId}`);
+    cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
+    if (!applySiteState(payload.state)) {
+      await siteRequest('/api/state', { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+    } else {
+      persistLocalState();
+    }
+    siteRuntime.ready = true;
+    cloud.status = 'synced';
+    render();
+    startSitePolling();
+  } catch (error) {
+    cloud.user = null;
+    cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
     render();
-    return;
+    if (error.status !== 401) console.warn('Pointline Site account setup failed', error);
   }
-  if (nextUserId === currentUserId && cloud.status === 'synced') return;
-  cloud.status = 'connecting';
-  updateCloudStatusBadge();
-  render();
-  try {
-    cloud.roomId = getConfiguredRoomId();
-    await ensureCloudRoom();
-    await loadCloudState();
-    subscribeToCloudRoom();
-  } catch (error) {
-    cloud.status = 'error';
-    updateCloudStatusBadge();
-    console.warn('Pointline cloud session setup failed', error);
-  }
-}
-
-async function initializeCloud() {
-  if (!cloudIsConfigured() || cloud.client) return;
-  cloud.status = 'connecting';
-  updateCloudStatusBadge();
-  try {
-    const { createClient } = await import(SUPABASE_CDN);
-    const config = getSupabaseConfig();
-    cloud.client = createClient(config.url, config.publishableKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    });
-    cloud.client.auth.onAuthStateChange((_event, session) => {
-      queueMicrotask(() => applyCloudSession(session));
-    });
-    const result = await cloud.client.auth.getSession();
-    await applyCloudSession(result.data?.session || null);
-  } catch (error) {
-    cloud.status = 'error';
-    updateCloudStatusBadge();
-    console.warn('Pointline Supabase client failed to load', error);
-  }
-}
-
-async function signInWithGoogle() {
-  if (!cloudIsConfigured()) {
-    showToast('Add Supabase URL and publishable key to supabase-config.js first');
-    return;
-  }
-  await initializeCloud();
-  if (!cloud.client) return;
-  const roomId = getConfiguredRoomId();
-  if (roomId) localStorage.setItem(ROOM_ID_KEY, roomId);
-  const redirectTo = `${window.location.origin}${window.location.pathname}`;
-  const { error } = await cloud.client.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo },
-  });
-  if (error) showToast(error.message || 'Google sign-in could not start');
-}
-
-async function signOut() {
-  if (!cloud.client) return;
-  const { error } = await cloud.client.auth.signOut();
-  if (error) showToast(error.message || 'Sign out failed');
 }
 
 function makeEntityId(prefix, existing) {
@@ -1663,4 +1533,4 @@ function showToast(message) {
 }
 
 render();
-initializeCloud();
+initializeSitesBackend();

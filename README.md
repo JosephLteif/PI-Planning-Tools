@@ -1,6 +1,6 @@
 # Pointline
 
-Pointline is a lightweight PI planning estimation room with a team-owned estimate and an optional AI-assisted second opinion. It also supports hidden/open planning rounds, story-to-service allocations, domain rollups, and CSV/text backlog import.
+Pointline is a lightweight PI planning estimation room with a team-owned estimate and an optional AI-assisted second opinion. It supports hidden/open planning rounds, story-to-service allocations, domain rollups, and CSV/text backlog import.
 
 ## Run locally
 
@@ -10,27 +10,24 @@ From PowerShell:
 .\start-pointline.ps1
 ```
 
-Open [http://localhost:4174/](http://localhost:4174/).
+Open [http://localhost:4174/](http://localhost:4174/). The local server is a browser-only demo; durable accounts and shared data are enabled on the hosted Site.
 
-Use the `localhost:4174` address rather than `127.0.0.1:4173`. The latter is shared with the Nightfall/Werewolf preview in this environment and can be controlled by its cached service worker.
+## Hosted accounts and persistence
 
-## Optional cloud setup
+The hosted Site uses Sites’ built-in **Sign in with ChatGPT** flow and a small D1 database. No Google OAuth client, Supabase project, browser secret, or API key is required.
 
-Supabase is the recommended low-resource backend for this static app. It provides Google Auth, a small Postgres database, and optional Realtime updates without adding a server to this repository.
+After sign-in:
 
-1. Create a Supabase project on the free plan.
-2. Open the SQL Editor and run [supabase/schema.sql](supabase/schema.sql).
-3. Enable Google under Authentication → Providers. In Google Cloud, add `http://localhost:4174` (and the production origin) as an authorized JavaScript origin, and add the Supabase callback `https://<project-ref>.supabase.co/auth/v1/callback` as an authorized redirect URI. Add the app origins to Supabase Authentication → URL Configuration as allowed redirect URLs.
-4. Copy the project URL and browser-safe publishable key into [supabase-config.js](supabase-config.js):
+- each ChatGPT identity is stored as an account and automatically joins the shared PI 24 room;
+- stories, final manual/AI fields, services, domains, allocations, and round state persist in D1;
+- votes are stored per account, story, and round;
+- hidden rounds return only your own vote plus the submitted count; open and revealed rounds return the room’s votes;
+- the browser polls the room while open so teammates can estimate the same story concurrently.
 
-   ```js
-   window.POINTLINE_SUPABASE_CONFIG = Object.freeze({
-     url: 'https://your-project.supabase.co',
-     publishableKey: 'sb_publishable_...',
-     roomId: '',
-   });
-   ```
+The D1 schema is defined in [db/schema.ts](db/schema.ts), and the generated migration is under [drizzle](drizzle). The Worker API is [server/index.js](server/index.js). `.openai/hosting.json` declares the logical D1 binding; Sites owns the actual database resource.
 
-   Leave `roomId` blank for the first signed-in user to create a room. The app saves that room ID locally and includes it in the Share room link. To open an existing room, use a link with `?room=<room-id>`; after Google sign-in, the SQL setup treats that UUID as the lightweight room invite and adds the user as an editor.
+The current Site is private to its owner. To let teammates use it, change the Site audience in Sites sharing settings, then have each teammate open the Site and choose **Sign in with ChatGPT**.
 
-Without these values, the sign-in button explains what is missing and Pointline remains fully usable in local demo mode. Never place a `service_role` or secret key in the browser config.
+## Deployment
+
+The repository is connected to the Pointline Site source repository. A server-backed package must contain `dist/server/index.js`, the static assets, `dist/.openai/hosting.json`, and the generated D1 migration under `dist/.openai/drizzle/` before saving a new Site version.

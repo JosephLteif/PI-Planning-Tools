@@ -1,0 +1,11 @@
+{
+  "name": "pointline-pi-planning",
+  "private": true,
+  "scripts": {
+    "db:generate": "drizzle-kit generate"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.4",
+    "drizzle-orm": "0.44.5"
+  }
+}
