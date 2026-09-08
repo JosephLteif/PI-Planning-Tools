@@ -3048,11 +3048,18 @@ async function loadAuthenticatedSiteSession() {
     const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
     const payload = await siteRequest(`/api/state${roomId}`);
     cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
+    rememberRemoteSiteState(payload);
     if (!applySiteState(payload.state)) {
-      const saved = await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      let saved;
+      try {
+        saved = await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        saved = await siteRequest(`/api/state${roomId}`);
+        if (!applySiteState(saved.state)) throw error;
+      }
       rememberRemoteSiteState(saved);
     } else {
-      rememberRemoteSiteState(payload);
       persistLocalState();
     }
     siteRuntime.syncedRevision = siteRuntime.stateRevision;
