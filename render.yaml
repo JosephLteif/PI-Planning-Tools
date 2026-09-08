@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pointline-node
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: POINTLINE_BOOTSTRAP_ADMIN_USERNAME
+        sync: false
+      - key: POINTLINE_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false

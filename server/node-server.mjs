@@ -3,7 +3,7 @@ import fastifyStatic from '@fastify/static';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
-import worker from './index.js';
+import { handleApi } from './index.js';
 import { createPostgresDatabase, createSqliteDatabase } from './database.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,7 +66,7 @@ await app.register(fastifyStatic, {
 app.get('/healthz', async () => ({ ok: true }));
 
 app.all('/api/*', async (request, reply) => {
-  const response = await worker.fetch(toWebRequest(request), env);
+  const response = await handleApi(toWebRequest(request), env);
   return sendWebResponse(response, reply);
 });
 

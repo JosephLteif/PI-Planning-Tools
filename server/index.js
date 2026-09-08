@@ -11,9 +11,7 @@ const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_ITERATIONS = 100000;
 const MAX_BODY_BYTES = 1_500_000;
-const STATIC_ASSETS = new Map();
 const ROOM_STREAMS = new Map();
-const ROOM_SOCKETS = new Map();
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -838,88 +836,18 @@ async function readRoomState(db, roomId, userId) {
 
 async function publishRoomState(db, roomId) {
   const streams = ROOM_STREAMS.get(roomId) || new Set();
-  const sockets = ROOM_SOCKETS.get(roomId) || new Set();
-  if (!streams.size && !sockets.size) return;
-  await Promise.all([
-    ...[...sockets].map(async (subscriber) => {
-      try {
-        const payload = await readRoomState(db, roomId, subscriber.userId);
-        if (subscriber.socket.readyState !== 1) {
-          subscriber.cleanup();
-          return;
-        }
-        subscriber.socket.send(JSON.stringify({ type: 'state', roomId, ...payload }));
-      } catch {
-        subscriber.cleanup();
-      }
-    }),
-    ...[...streams].map(async (subscriber) => {
+  if (!streams.size) return;
+  await Promise.all([...streams].map(async (subscriber) => {
     try {
       const payload = await readRoomState(db, roomId, subscriber.userId);
       subscriber.controller.enqueue(subscriber.encoder.encode(streamEvent('state', { roomId, ...payload })));
     } catch {
       subscriber.cleanup();
     }
-    }),
-  ]);
-}
-
-function createRoomSocket(roomId, userId, socket, initialPayload) {
-  let cleanedUp = false;
-  const cleanup = () => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    clearInterval(subscriber.heartbeat);
-    ROOM_SOCKETS.get(roomId)?.delete(subscriber);
-    if (!ROOM_SOCKETS.get(roomId)?.size) ROOM_SOCKETS.delete(roomId);
-  };
-  const subscriber = {
-    socket,
-    userId,
-    cleanup,
-    heartbeat: setInterval(() => {
-      try {
-        if (socket.readyState !== 1) {
-          cleanup();
-          return;
-        }
-        socket.send(JSON.stringify({ type: 'keep-alive' }));
-      } catch {
-        cleanup();
-      }
-    }, 25000),
-  };
-  socket.addEventListener('close', cleanup);
-  socket.addEventListener('error', cleanup);
-  socket.addEventListener('message', (event) => {
-    if (event.data !== 'ping' && event.data !== '{"type":"ping"}') return;
-    try {
-      socket.send(JSON.stringify({ type: 'pong' }));
-    } catch {
-      cleanup();
-    }
-  });
-  const subscribers = ROOM_SOCKETS.get(roomId) || new Set();
-  subscribers.add(subscriber);
-  ROOM_SOCKETS.set(roomId, subscribers);
-  try {
-    socket.send(JSON.stringify({ type: 'state', roomId, ...initialPayload }));
-  } catch {
-    cleanup();
-  }
+  }));
 }
 
 function closeRoomSubscribers(roomId) {
-  for (const subscriber of ROOM_SOCKETS.get(roomId) || []) {
-    subscriber.cleanup();
-    try {
-      subscriber.socket.send(JSON.stringify({ type: 'room-deleted', roomId }));
-      subscriber.socket.close(1000, 'Room deleted');
-    } catch {
-      // The client may already have disconnected.
-    }
-  }
-  ROOM_SOCKETS.delete(roomId);
   for (const subscriber of ROOM_STREAMS.get(roomId) || []) {
     subscriber.cleanup();
     try {
@@ -1282,26 +1210,6 @@ async function createInvite(db, request, user, input) {
   return { token, kind, url: url.toString(), expiresAt };
 }
 
-async function handleRoomSocket(request, env) {
-  if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
-    return json({ error: 'WebSocket upgrade required' }, 426, { upgrade: 'websocket' });
-  }
-  const user = await getSessionUser(env.DB, request);
-  if (!user) return json({ error: 'Sign in with your Pointline username and password' }, 401);
-  await ensureDefaultRoomMembership(env.DB, user);
-  const roomId = roomIdFromRequest(request);
-  await requireMember(env.DB, roomId, user);
-  const room = await readRoomState(env.DB, roomId, user.id);
-  if (!room.room) return json({ error: 'Room not found' }, 404);
-
-  const pair = new WebSocketPair();
-  const client = pair[0];
-  const socket = pair[1];
-  socket.accept();
-  createRoomSocket(roomId, user.id, socket, room);
-  return new Response(null, { status: 101, webSocket: client });
-}
-
 async function acceptInvite(db, user, token) {
   const invite = await readInvite(db, token);
   if (!invite) {
@@ -1332,12 +1240,9 @@ async function acceptInvite(db, user, token) {
   return { invite, roomId: invite.room?.id || null, teamId: invite.team?.id || null };
 }
 
-async function handleApi(request, env) {
+async function handleApiRequest(request, env) {
   if (!env.DB) return json({ error: 'The Pointline database binding is not configured' }, 500);
   const url = new URL(request.url);
-  if (url.pathname === '/api/state/socket' && request.method === 'GET') {
-    return handleRoomSocket(request, env);
-  }
   if (url.pathname === '/api/invites' && request.method === 'GET') {
     const invite = await readInvite(env.DB, cleanInviteToken(url.searchParams.get('token')));
     return invite ? json({ invite }) : json({ error: 'This invite link is missing or expired' }, 404);
@@ -1555,42 +1460,12 @@ async function handleApi(request, env) {
   return json({ error: 'Not found' }, 404);
 }
 
-async function serveStatic(request, env) {
-  if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
-    const platformResponse = await env.ASSETS.fetch(request);
-    if (platformResponse.status !== 404) return platformResponse;
+export async function handleApi(request, env) {
+  try {
+    return await handleApiRequest(request, env);
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    if (status >= 500) console.error('Pointline API error', error);
+    return json({ error: status >= 500 ? 'The Pointline service is temporarily unavailable' : error.message }, status);
   }
-  const requestedPath = new URL(request.url).pathname;
-  const assetPath = requestedPath === '/' ? '/index.html' : requestedPath;
-  const asset = STATIC_ASSETS.get(assetPath);
-  if (!asset) return new Response('Not found', { status: 404 });
-  const contentType = assetPath.endsWith('.html')
-    ? 'text/html; charset=utf-8'
-    : assetPath.endsWith('.css')
-      ? 'text/css; charset=utf-8'
-      : assetPath.endsWith('.svg')
-        ? 'image/svg+xml'
-      : 'application/javascript; charset=utf-8';
-  return new Response(asset, {
-    headers: {
-      'content-type': contentType,
-      'cache-control': 'no-cache',
-    },
-  });
 }
-
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/')) {
-      try {
-        return await handleApi(request, env);
-      } catch (error) {
-        const status = Number.isInteger(error?.status) ? error.status : 500;
-        if (status >= 500) console.error('Pointline API error', error);
-        return json({ error: status >= 500 ? 'The Pointline service is temporarily unavailable' : error.message }, status);
-      }
-    }
-    return serveStatic(request, env);
-  },
-};

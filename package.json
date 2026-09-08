@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build:frontend && node scripts/build-site.cjs",
+    "build": "npm run build:frontend",
     "build:frontend": "vite build --config vite.config.mjs",
     "build:all": "npm run build",
+    "start": "node server/node-server.mjs",
     "db:generate": "drizzle-kit generate",
     "db:generate:postgres": "drizzle-kit generate --config drizzle.postgres.config.ts",
     "dev:frontend": "vite --config vite.config.mjs"
