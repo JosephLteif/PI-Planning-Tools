@@ -2699,8 +2699,10 @@ function siteStatePayload() {
 }
 
 function rememberRemoteSiteState(payload) {
+  if (payload?.room && Number.isFinite(Number(payload.room.stateVersion))) {
+    siteRuntime.serverStateVersion = Math.max(0, Number(payload.room.stateVersion));
+  }
   if (!payload?.state || !Array.isArray(payload.state.stories)) return;
-  siteRuntime.serverStateVersion = Number(payload.room?.stateVersion) || 0;
   siteRuntime.baseState = structuredClone(payload.state);
 }
 
