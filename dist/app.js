@@ -240,6 +240,7 @@ const siteRuntime = {
   socket: null,
   eventSource: null,
   realtimeRetryTimer: null,
+  realtimePollTimer: null,
   realtimeRetryDelay: 1000,
   saveTimers: new Map(),
   saveChains: new Map(),
@@ -2897,6 +2898,10 @@ function stopSiteRealtime() {
     clearTimeout(siteRuntime.realtimeRetryTimer);
     siteRuntime.realtimeRetryTimer = null;
   }
+  if (siteRuntime.realtimePollTimer) {
+    clearTimeout(siteRuntime.realtimePollTimer);
+    siteRuntime.realtimePollTimer = null;
+  }
   siteRuntime.realtimeRetryDelay = 1000;
   siteRuntime.pendingRealtimeState = null;
 }
@@ -2951,6 +2956,30 @@ async function handleRealtimeRoomDeleted() {
   }
   await selectRoom(fallback.id);
   showToast('This room was deleted — switched to another room');
+}
+
+function startSiteRealtimePolling() {
+  if (!siteRuntime.ready || siteRuntime.realtimePollTimer) return;
+  const roomId = cloud.roomId;
+  const poll = async () => {
+    if (!siteRuntime.ready || activeRoomId !== roomId || cloud.roomId !== roomId) {
+      siteRuntime.realtimePollTimer = null;
+      return;
+    }
+    try {
+      const payload = await siteRequest(roomScopedApiPath('/api/state', roomId));
+      if (activeRoomId === roomId && cloud.roomId === roomId) applyRealtimeState(payload);
+    } catch (error) {
+      if (!handleSessionExpired(error)) console.warn('Pointline realtime refresh failed', error);
+    } finally {
+      if (siteRuntime.ready && activeRoomId === roomId && cloud.roomId === roomId) {
+        siteRuntime.realtimePollTimer = window.setTimeout(poll, 1000);
+      } else {
+        siteRuntime.realtimePollTimer = null;
+      }
+    }
+  };
+  siteRuntime.realtimePollTimer = window.setTimeout(poll, 1000);
 }
 
 function startSiteRealtime() {
@@ -3078,6 +3107,7 @@ function startSiteRealtime() {
   } else {
     connectSocket();
   }
+  startSiteRealtimePolling();
 }
 
 function hasActiveEditor() {
