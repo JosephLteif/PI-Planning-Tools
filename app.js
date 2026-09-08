@@ -1025,13 +1025,18 @@ function renderSidebar(view = activeView) {
     <p class="sidebar-kicker">Planning workspace</p>
     ${renderRoomSelector()}
 
-    <nav class="sidebar-nav" aria-label="Workspace navigation">
+    <nav class="sidebar-nav sidebar-room-nav" aria-label="Selected room navigation">
+      <p class="sidebar-nav-heading">Selected room</p>
       <button class="nav-link ${view === 'estimates' ? 'active' : ''}" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${state.stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length}/${state.stories.filter((story) => story.type !== 'Epic').length}</span></button>
-      <button class="nav-link ${view === 'team' ? 'active' : ''}" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
       <button class="nav-link ${view === 'resources' ? 'active' : ''}" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
       <button class="nav-link ${view === 'capacity' ? 'active' : ''}" type="button" data-nav="capacity">${icon('clock')}<span class="nav-link-label">Capacity</span><span class="nav-count">${state.capacity.sprints.length}</span></button>
-      <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
       <button class="nav-link ${view === 'settings' ? 'active' : ''}" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
+    </nav>
+
+    <nav class="sidebar-nav sidebar-general-nav" aria-label="Workspace navigation">
+      <p class="sidebar-nav-heading">Workspace</p>
+      <button class="nav-link ${view === 'team' ? 'active' : ''}" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
+      <button class="nav-link ${view === 'rooms' ? 'active' : ''}" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${roomCount}</span></button>
       ${isAdmin() ? `<button class="nav-link ${view === 'admin' ? 'active' : ''}" type="button" data-nav="admin">${icon('shield')}<span class="nav-link-label">Admin users</span><span class="nav-count">${cloud.adminUsers.length || ''}</span></button>` : ''}
     </nav>
 

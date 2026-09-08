@@ -203,6 +203,25 @@ button {
   margin-top: 25px;
 }
 
+.sidebar-room-nav {
+  margin-top: 16px;
+}
+
+.sidebar-general-nav {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.sidebar-nav-heading {
+  margin: 0 12px 3px;
+  color: #8190a6;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
 .nav-link {
   display: flex;
   align-items: center;
@@ -3090,7 +3109,9 @@ h1 {
 }
 
 .modal-wide {
-  width: min(100%, 760px);
+  width: min(100%, 860px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
 }
 
 .service-manager-grid {
@@ -3116,7 +3137,21 @@ h1 {
 }
 
 .manager-service-form {
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.8fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.manager-service-form input {
+  grid-column: 1 / -1;
+}
+
+.manager-service-form select {
+  grid-column: 1;
+}
+
+.manager-service-form button {
+  grid-column: 2;
+  grid-row: 2;
+  white-space: nowrap;
 }
 
 .manager-form .primary-button {
@@ -3180,15 +3215,22 @@ h1 {
 
 .manager-service-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(120px, 145px) 28px;
+  grid-template-columns: minmax(0, 1fr) 28px;
   gap: 10px;
 }
 
 .manager-domain-select {
-  width: 145px;
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
   max-width: 100%;
   color: var(--ink-muted);
   font-size: 9px;
+}
+
+.manager-service-row .compact-icon {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .empty-manager {
@@ -3663,6 +3705,7 @@ h1 {
   .brand-text,
   .sidebar-kicker,
   .room-context-label,
+  .sidebar-nav-heading,
   .room-selector-copy,
   .room-selector > svg,
   .room-selector-action,
@@ -3688,6 +3731,13 @@ h1 {
   .sidebar-nav {
     width: 100%;
     margin-top: 22px;
+  }
+
+  .sidebar-room-nav,
+  .sidebar-general-nav {
+    margin-top: 22px;
+    padding-top: 0;
+    border-top: 0;
   }
 
   .nav-link {
@@ -3748,7 +3798,17 @@ h1 {
   .sidebar-nav {
     display: flex;
     width: auto;
-    margin: 0 0 0 auto;
+    margin: 0;
+  }
+
+  .sidebar-room-nav {
+    margin-left: auto;
+  }
+
+  .sidebar-general-nav {
+    gap: 0;
+    padding-top: 0;
+    border-top: 0;
   }
 
   .nav-link {
@@ -4033,23 +4093,6 @@ h1 {
     margin-top: 12px;
   }
 
-  .manager-service-form {
-    grid-template-columns: 1fr auto;
-  }
-
-  .manager-service-form input {
-    grid-column: 1 / -1;
-  }
-
-  .manager-service-form select {
-    grid-column: 1;
-  }
-
-  .manager-service-form button {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
   .manager-service-row {
     grid-template-columns: minmax(0, 1fr) 28px;
   }
@@ -4058,11 +4101,6 @@ h1 {
     grid-column: 1;
     grid-row: 2;
     width: 100%;
-  }
-
-  .manager-service-row .compact-icon {
-    grid-column: 2;
-    grid-row: 1;
   }
 
   .toast {
