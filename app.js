@@ -237,17 +237,21 @@ let cloud = {
 const siteRuntime = {
   enabled: window.location.hostname.endsWith('.chatgpt.site'),
   ready: false,
-  eventSource: null,
+  socket: null,
   realtimeRetryTimer: null,
+  realtimeRetryDelay: 1000,
   saveTimers: new Map(),
   saveChains: new Map(),
   saveInFlight: 0,
+  voteSaveChains: new Map(),
+  voteSyncInFlight: 0,
+  voteRevision: 0,
+  pendingRealtimeState: null,
   stateRevision: 0,
   syncedRevision: 0,
   revisionRoomId: cloud.roomId,
   serverStateVersion: 0,
   baseState: null,
-  refreshing: false,
 };
 
 const participantId = getOrCreateParticipantId();
@@ -333,7 +337,7 @@ function normalizeRound(round, storyId) {
       ? new Date(Date.parse(source.timerEndsAt) - 5 * 60 * 1000).toISOString()
       : null),
     timerEndsAt: source.timerEndsAt || null,
-    players: Array.isArray(source.players) ? source.players : [],
+    players: Array.isArray(source.players) ? source.players.map((player) => ({ ...player, joined: player.joined !== false })) : [],
   };
 }
 
@@ -504,6 +508,7 @@ function resetSiteSyncForRoom(roomId) {
   siteRuntime.syncedRevision = 0;
   siteRuntime.serverStateVersion = 0;
   siteRuntime.baseState = null;
+  siteRuntime.pendingRealtimeState = null;
 }
 
 function persistLocalState() {
@@ -673,11 +678,15 @@ function getRoundVoteCount() {
 
 function getRoundPlayers() {
   if (Array.isArray(state.round.players) && state.round.players.length) return state.round.players;
-  return [{ id: getVoteIdentity(), name: getUserName(), role: 'owner', hasVoted: getRoundVotes().length > 0, manual: getOwnVote().manual, ai: getOwnVote().ai, aiEnabled: getOwnVote().aiEnabled }];
+  return [{ id: getVoteIdentity(), name: getUserName(), role: 'owner', joined: !siteRuntime.ready, hasVoted: getRoundVotes().length > 0, manual: getOwnVote().manual, ai: getOwnVote().ai, aiEnabled: getOwnVote().aiEnabled }];
+}
+
+function getActiveRoundPlayers(players = getRoundPlayers()) {
+  return players.filter((player) => player.joined !== false);
 }
 
 function everyoneVoted() {
-  const players = getRoundPlayers();
+  const players = getActiveRoundPlayers();
   return players.length > 0 && players.every((player) => player.hasVoted === true);
 }
 
@@ -845,12 +854,16 @@ function renderVoteField(type, vote) {
 function renderVotePlayers(players, revealValues) {
   return `<div class="vote-player-list" aria-label="Room players">${players.map((player, index) => {
     const name = player.name || (player.id === getVoteIdentity() ? 'You' : `Player ${index + 1}`);
-    const hasVoted = player.hasVoted === true || player.manual !== null || player.ai !== null;
-    const value = revealValues ? formatScore(player.manual) : hasVoted ? 'Hidden' : '—';
+    const joined = player.joined !== false;
+    const manual = joined ? normalizeEstimate(player.manual) : null;
+    const ai = joined ? normalizeEstimate(player.ai) : null;
+    const hasVoted = joined && (player.hasVoted === true || manual !== null || ai !== null);
+    const status = !joined ? 'Not participating' : hasVoted ? 'Voted' : 'Waiting';
+    const value = revealValues ? formatScore(manual) : hasVoted ? 'Hidden' : '—';
     const values = revealValues
-      ? `<span class="vote-player-values"><span class="vote-player-estimate"><small>Manual</small><strong>${formatScore(player.manual)}</strong></span><span class="vote-player-estimate ai"><small>AI</small><strong>${formatScore(player.ai)}</strong></span></span>`
+      ? `<span class="vote-player-values"><span class="vote-player-estimate"><small>Manual</small><strong>${formatScore(manual)}</strong></span><span class="vote-player-estimate ai"><small>AI</small><strong>${formatScore(ai)}</strong></span></span>`
       : `<span class="vote-player-value ${hasVoted ? '' : 'is-waiting'}">${escapeHTML(value)}</span>`;
-    return `<div class="vote-player-row ${revealValues ? 'has-both-estimates' : ''}"><span class="vote-player-avatar">${escapeHTML(getInitials(name))}</span><span class="vote-player-copy"><strong>${escapeHTML(name)}${player.role === 'owner' ? ' <span class="role-badge">Owner</span>' : ''}</strong><small class="${hasVoted ? 'is-voted' : 'is-waiting'}">${hasVoted ? 'Voted' : 'Waiting'}</small></span>${values}</div>`;
+    return `<div class="vote-player-row ${revealValues ? 'has-both-estimates' : ''} ${joined ? '' : 'is-not-joined'}"><span class="vote-player-avatar">${escapeHTML(getInitials(name))}</span><span class="vote-player-copy"><strong>${escapeHTML(name)}${player.role === 'owner' ? ' <span class="role-badge">Owner</span>' : ''}</strong><small class="${!joined ? 'is-not-joined' : hasVoted ? 'is-voted' : 'is-waiting'}">${status}</small></span>${values}</div>`;
   }).join('')}</div>`;
 }
 
@@ -876,6 +889,9 @@ function renderVotePanel(story) {
   const entries = getRoundVotes();
   const ownVote = getOwnVote();
   const players = getRoundPlayers();
+  const activePlayers = getActiveRoundPlayers(players);
+  const currentPlayer = players.find((player) => player.id === getVoteIdentity());
+  const isJoined = currentPlayer ? currentPlayer.joined !== false : !siteRuntime.ready;
   const moderator = canModerateRoom();
   const isRevealed = round.phase === 'revealed';
   const allVoted = everyoneVoted();
@@ -888,13 +904,22 @@ function renderVotePanel(story) {
   }
 
   const voteCount = getRoundVoteCount();
-  const voteSummary = countVisible ? `${voteCount}/${players.length} voted` : 'Waiting for everyone to vote';
+  const voteSummary = countVisible
+    ? activePlayers.length ? `${voteCount}/${activePlayers.length} voted` : 'No voters joined yet'
+    : 'Waiting for everyone to vote';
   const voteStatus = isRevealed
     ? `${icon('check')} Votes revealed · ${voteSummary}`
-    : `${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${voteSummary} · ${round.mode === 'hidden' ? 'values hidden' : 'live results'}`;
-  const personalAction = '';
-  const moderatorActions = moderator ? `<button class="outline-button" type="button" data-reset-timer>${icon('clock')}Reset timer</button><button class="outline-button" type="button" data-skip-story>${icon('skip')}Skip story</button><button class="outline-button" type="button" data-clear-votes>${icon('refresh')}Clear votes</button>${isRevealed ? '<button class="primary-button" type="button" data-reset-round>New round</button>' : `<button class="primary-button" type="button" data-reveal-votes ${voteCount > 0 ? '' : 'disabled'}>${icon('eye')}Reveal votes</button>`}` : '';
-  return `<div class="vote-panel ${isRevealed ? 'is-revealed' : ''}"><div class="vote-panel-heading"><div><p class="section-kicker">${isRevealed ? 'Round result' : 'Voting in progress'}</p><h3>${isRevealed ? 'Compare the room' : 'Choose your estimates'}</h3><p>${isRevealed ? 'The room can now compare every player’s perspective and agree a final estimate.' : 'Pick a number card in either section. Normal estimation drives planning; AI is an optional room setting.'}</p></div><div class="vote-heading-actions">${modeButtons}<span class="round-timer" data-round-timer>${formatRoundTimer(getElapsedRoundSeconds())}</span></div></div>${isRevealed ? renderVoteResults(entries) : `<div class="vote-fields vote-choice-grid">${renderVoteField('manual', ownVote)}${state.roomSettings.aiEnabled ? renderVoteField('ai', ownVote) : ''}</div>`}${!isRevealed ? `<div class="vote-players-section"><div class="vote-players-heading"><strong>Players</strong><span>${countVisible ? `${voteCount} of ${players.length} voted` : 'Votes hidden until everyone votes'}</span></div>${renderVotePlayers(players, canSeeValues)}</div>` : ''}<div class="vote-panel-footer"><span class="vote-status">${voteStatus}</span><div class="vote-actions">${personalAction}${moderatorActions}</div></div></div>`;
+    : isJoined
+      ? `${icon(round.mode === 'hidden' ? 'lock' : 'eye')} ${voteSummary} · ${round.mode === 'hidden' ? 'values hidden' : 'live results'}`
+      : `${icon('users')} Join this round when you’re ready · ${voteSummary}`;
+  const personalAction = !isRevealed && isJoined
+    ? `<button class="outline-button compact-button" type="button" data-leave-voting>${icon('minus')}Leave voting</button>`
+    : '';
+  const voteChoices = isJoined
+    ? `<div class="vote-fields vote-choice-grid">${renderVoteField('manual', ownVote)}${state.roomSettings.aiEnabled ? renderVoteField('ai', ownVote) : ''}</div>`
+    : `<div class="vote-join-callout"><div><strong>You’re not in this round yet</strong><span>Join when you’re ready to submit a vote. You can leave before the reveal.</span></div><button class="primary-button compact-button" type="button" data-join-voting>${icon('check')}Join voting</button></div>`;
+  const moderatorActions = moderator ? `<button class="outline-button" type="button" data-reset-timer>${icon('clock')}Reset timer</button><button class="outline-button" type="button" data-skip-story>${icon('skip')}Skip story</button><button class="outline-button" type="button" data-clear-votes>${icon('refresh')}Clear votes</button>${isRevealed ? `<button class="primary-button" type="button" data-reset-round>${icon('refresh')}Revote story</button>` : `<button class="primary-button" type="button" data-reveal-votes ${voteCount > 0 ? '' : 'disabled'}>${icon('eye')}Reveal votes</button>`}` : '';
+  return `<div class="vote-panel ${isRevealed ? 'is-revealed' : ''}"><div class="vote-panel-heading"><div><p class="section-kicker">${isRevealed ? 'Round result' : 'Voting in progress'}</p><h3>${isRevealed ? 'Compare the room' : 'Choose your estimates'}</h3><p>${isRevealed ? 'The room can now compare every player’s perspective and agree a final estimate.' : 'Join this round when you are ready, then pick a number card. Normal estimation drives planning; AI is an optional room setting.'}</p></div><div class="vote-heading-actions">${modeButtons}<span class="round-timer" data-round-timer>${formatRoundTimer(getElapsedRoundSeconds())}</span></div></div>${isRevealed ? renderVoteResults(entries) : voteChoices}${!isRevealed ? `<div class="vote-players-section"><div class="vote-players-heading"><strong>Players</strong><span>${countVisible ? `${activePlayers.length} joined · ${voteCount} voted` : `${activePlayers.length} joined · Votes hidden until everyone votes`}</span></div>${renderVotePlayers(players, canSeeValues)}</div>` : ''}<div class="vote-panel-footer"><span class="vote-status">${voteStatus}</span><div class="vote-actions">${personalAction}${moderatorActions}</div></div></div>`;
 }
 
 function renderAllocationCard() {
@@ -956,7 +981,7 @@ function renderRoomsPage() {
   </section>
   <section class="management-section">
     <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
-     <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${isAdmin() || (room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID) ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Remove</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
+    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${isAdmin() || (room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID) ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Delete room</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
   </section>`;
 }
 
@@ -1205,7 +1230,7 @@ function render() {
         <div class="lower-grid lower-grid-single">
           <section class="card history-card">
             <div class="lower-card-heading"><h2>Estimate history</h2><span>Click a story for per-person votes</span></div>
-            <table class="history-table"><thead><tr><th>Story</th><th>Manual</th><th>AI</th><th>Difference</th></tr></thead><tbody>${renderHistoryRows()}</tbody></table>
+            <table class="history-table"><thead><tr><th>Story</th><th>Manual</th><th>AI</th><th>Difference</th><th>Action</th></tr></thead><tbody>${renderHistoryRows()}</tbody></table>
           </section>
         </div>
       </div>
@@ -1238,6 +1263,8 @@ function renderStoryRow(story, index, queueStories = state.stories) {
   const status = story.type === 'Epic' ? 'Epic · roll-up' : story.manual !== null ? 'Estimated' : 'Needs estimate';
   const parentLabel = story.type !== 'Epic' && epic ? ` · ${epic.title}` : '';
   const canDelete = state.stories.length > 1;
+  const canRevote = canModerateRoom() && story.type !== 'Epic' && (state.voteHistory || []).some((entry) => entry.storyId === story.id);
+  const deleteLabel = story.type === 'Epic' ? 'Delete epic' : 'Delete story';
   return `<div class="story-row ${story.id === state.selectedStoryId ? 'active' : ''}">
     <button class="story-row-main" type="button" data-story-id="${escapeHTML(story.id)}">
       <span class="story-number">${String(index + 1).padStart(2, '0')}</span>
@@ -1248,7 +1275,8 @@ function renderStoryRow(story, index, queueStories = state.stories) {
       <button class="story-action-button" type="button" data-move-story="up" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} up" ${index === 0 ? 'disabled' : ''}>${icon('chevronUp')}</button>
       <button class="story-action-button" type="button" data-move-story="down" data-story-action-id="${escapeHTML(story.id)}" aria-label="Move ${escapeHTML(story.title)} down" ${index === queueStories.length - 1 ? 'disabled' : ''}>${icon('chevronDown')}</button>
       <button class="story-action-button" type="button" data-edit-story="${escapeHTML(story.id)}" aria-label="Edit ${escapeHTML(story.title)}">${icon('edit')}</button>
-      <button class="story-action-button danger-action" type="button" data-delete-story="${escapeHTML(story.id)}" aria-label="Remove ${escapeHTML(story.title)}" ${canDelete ? '' : 'disabled'}>${icon('trash')}</button>
+      ${canRevote ? `<button class="story-action-button" type="button" data-revote-story="${escapeHTML(story.id)}" aria-label="Revote ${escapeHTML(story.title)}">${icon('refresh')}</button>` : ''}
+      <button class="story-action-button danger-action" type="button" data-delete-story="${escapeHTML(story.id)}" aria-label="${deleteLabel} ${escapeHTML(story.title)}" title="${deleteLabel}" ${canDelete ? '' : 'disabled'}>${icon('trash')}</button>
     </span>
   </div>`;
 }
@@ -1276,7 +1304,7 @@ function renderStoryQueueGroups() {
   const visibleGroups = selectedEpic
     ? groups.filter((group) => group.epic?.id === selectedEpic.id || group.id === 'unlinked')
     : groups;
-  const epicSelector = epics.length ? `<div class="epic-selector"><span class="epic-selector-mark ${selectedMetrics?.progress === 100 ? 'is-complete' : ''}">${selectedMetrics?.progress === 100 ? icon('check') : icon('clock')}</span><div class="epic-selector-copy"><span>Work on epic</span><select data-epic-select aria-label="Choose epic">${epics.map((epic) => `<option value="${escapeHTML(epic.id)}" ${selectedEpic?.id === epic.id ? 'selected' : ''}>${escapeHTML(epic.title)}</option>`).join('')}</select></div><span class="epic-selector-progress">${selectedMetrics ? `${selectedMetrics.manualStories.length}/${selectedMetrics.children.length}` : '0/0'}</span><span class="epic-selector-status">${selectedMetrics?.progress === 100 ? 'Done' : 'In progress'}</span></div>` : '';
+  const epicSelector = epics.length ? `<div class="epic-selector"><span class="epic-selector-mark ${selectedMetrics?.progress === 100 ? 'is-complete' : ''}">${selectedMetrics?.progress === 100 ? icon('check') : icon('clock')}</span><div class="epic-selector-copy"><span>Work on epic</span><div class="epic-selector-select-row"><select data-epic-select aria-label="Choose epic">${epics.map((epic) => `<option value="${escapeHTML(epic.id)}" ${selectedEpic?.id === epic.id ? 'selected' : ''}>${escapeHTML(epic.title)}</option>`).join('')}</select>${selectedEpic && state.stories.length > 1 ? `<button class="outline-button compact-button danger-outline epic-selector-delete" type="button" data-delete-story="${escapeHTML(selectedEpic.id)}">${icon('trash')}Delete epic</button>` : ''}</div></div><span class="epic-selector-progress">${selectedMetrics ? `${selectedMetrics.manualStories.length}/${selectedMetrics.children.length}` : '0/0'}</span><span class="epic-selector-status">${selectedMetrics?.progress === 100 ? 'Done' : 'In progress'}</span></div>` : '';
   return `${epicSelector}<div class="story-queues">${visibleGroups.map((group) => {
     const storyCount = group.epic ? group.stories.length : group.stories.filter((story) => story.type !== 'Epic').length;
     const estimatedCount = group.stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length;
@@ -1288,7 +1316,7 @@ function renderStoryQueueGroups() {
 
 function renderHistoryRows() {
   const rows = state.stories.filter((story) => story.type !== 'Epic' && (story.manual !== null || story.ai !== null)).slice(0, 5);
-  if (!rows.length) return '<tr><td colspan="4" class="table-score muted">No estimates recorded yet.</td></tr>';
+  if (!rows.length) return '<tr><td colspan="5" class="table-score muted">No estimates recorded yet.</td></tr>';
 
   return rows.map((story) => {
     const difference = story.manual !== null && story.ai !== null ? Math.abs(story.manual - story.ai) : null;
@@ -1296,7 +1324,7 @@ function renderHistoryRows() {
     const memberContent = memberRows.length
       ? `<div class="history-member-list">${memberRows.map((entry) => `<div class="history-member-row"><span><strong>${escapeHTML(entry.voterId === getVoteIdentity() ? 'You' : entry.voterName || 'Planner')}</strong><small>Round #${entry.roundNumber}</small></span><span class="table-score">${formatScore(entry.manual)}</span><span class="table-score ${entry.ai === null ? 'muted' : ''}">${formatScore(entry.ai)}</span></div>`).join('')}</div>`
       : '<p class="history-detail-empty">No revealed member votes for this story yet.</p>';
-    return `<tr class="history-story-row"><td><button class="history-story-toggle" type="button" data-history-story="${escapeHTML(story.id)}" aria-expanded="false">${icon('chevron')}<span class="history-story" title="${escapeHTML(story.title)}">${escapeHTML(story.title)}</span></button></td><td class="table-score">${formatScore(story.manual)}</td><td class="table-score ${story.ai === null ? 'muted' : ''}">${formatScore(story.ai)}</td><td>${difference === 0 ? `<span class="agreement">${icon('check')}Aligned</span>` : difference === null ? '<span class="table-score muted">—</span>' : `<span class="table-score">${formatScore(difference)} pts apart</span>`}</td></tr><tr class="history-detail-row" data-history-detail="${escapeHTML(story.id)}" hidden><td colspan="4"><div class="history-detail"><div class="history-detail-heading"><strong>Member perspectives</strong><span>Manual · AI</span></div>${memberContent}</div></td></tr>`;
+    return `<tr class="history-story-row"><td><button class="history-story-toggle" type="button" data-history-story="${escapeHTML(story.id)}" aria-expanded="false">${icon('chevron')}<span class="history-story" title="${escapeHTML(story.title)}">${escapeHTML(story.title)}</span></button></td><td class="table-score">${formatScore(story.manual)}</td><td class="table-score ${story.ai === null ? 'muted' : ''}">${formatScore(story.ai)}</td><td>${difference === 0 ? `<span class="agreement">${icon('check')}Aligned</span>` : difference === null ? '<span class="table-score muted">—</span>' : `<span class="table-score">${formatScore(difference)} pts apart</span>`}</td><td>${canModerateRoom() ? `<button class="outline-button compact-button history-revote-button" type="button" data-revote-story="${escapeHTML(story.id)}">${icon('refresh')}Revote</button>` : ''}</td></tr><tr class="history-detail-row" data-history-detail="${escapeHTML(story.id)}" hidden><td colspan="5"><div class="history-detail"><div class="history-detail-heading"><strong>Member perspectives</strong><span>Manual · AI</span></div>${memberContent}</div></td></tr>`;
   }).join('');
 }
 
@@ -1596,6 +1624,9 @@ function bindEvents() {
   document.querySelectorAll('[data-history-story]').forEach((button) => {
     button.addEventListener('click', () => toggleHistoryStory(button.dataset.historyStory, button));
   });
+  document.querySelectorAll('[data-revote-story]').forEach((button) => {
+    button.addEventListener('click', () => revoteStory(button.dataset.revoteStory));
+  });
   document.querySelectorAll('[data-edit-story]').forEach((button) => {
     button.addEventListener('click', () => openStoryEditorModal(button.dataset.editStory));
   });
@@ -1693,6 +1724,8 @@ function bindEvents() {
     button.addEventListener('click', () => setVoteMode(button.dataset.voteMode));
   });
   document.querySelector('[data-start-voting]')?.addEventListener('click', startVoting);
+  document.querySelector('[data-join-voting]')?.addEventListener('click', () => setVoteParticipation(true));
+  document.querySelector('[data-leave-voting]')?.addEventListener('click', () => setVoteParticipation(false));
   document.querySelector('[data-flip-card]')?.addEventListener('click', flipVoteCard);
   document.querySelector('[data-reveal-votes]')?.addEventListener('click', revealVotes);
   document.querySelector('[data-apply-round-average]')?.addEventListener('click', applyRoundAverage);
@@ -1719,7 +1752,7 @@ function bindEvents() {
     vote.aiEnabled = event.target.checked;
     if (!vote.aiEnabled) vote.ai = null;
     state.round.votes[cloud.user?.id || participantId] = vote;
-    saveState();
+    persistLocalState();
     syncSiteVote();
     render();
   });
@@ -1851,14 +1884,18 @@ async function selectRoom(roomId) {
 async function deleteRoomRecord(roomId) {
   const room = cloud.rooms.find((candidate) => candidate.id === roomId);
   if (!room || (room.role !== 'owner' && !isAdmin())) {
-    showToast('Only the room owner or a workspace admin can remove a room');
+    showToast('Only the room owner or a workspace admin can delete a room');
     return;
   }
   if (!isAdmin() && (room.id === 'pi-24-commerce' || room.id === LOCAL_DEFAULT_ROOM_ID)) {
-    showToast('The default room cannot be removed');
+    showToast('The default room cannot be deleted');
     return;
   }
-  if (!window.confirm(`Remove “${room.name}”? Its stories and estimates will be deleted.`)) return;
+  if (cloud.rooms.length <= 1) {
+    showToast('Keep at least one planning room available');
+    return;
+  }
+  if (!window.confirm(`Delete “${room.name}”? Its stories, votes, and estimates will be permanently deleted.`)) return;
 
   try {
     if (siteRuntime.ready) {
@@ -1896,7 +1933,7 @@ async function deleteRoomRecord(roomId) {
       localStorage.removeItem(`${STORAGE_KEY}-${roomId}`);
       render();
     }
-    showToast(`${room.name} removed`);
+    showToast(`${room.name} deleted`);
   } catch (error) {
     showToast(error.message || 'Room could not be removed');
   }
@@ -2141,9 +2178,36 @@ function selectStory(storyId) {
     return;
   }
   state.selectedStoryId = storyId;
-  if (state.round.storyId !== storyId) state.round = makeRound(storyId, state.roomSettings.voteMode, state.round.roundNumber + 1);
+  if (state.round.storyId !== storyId) state.round = makeRound(storyId, state.roomSettings.voteMode, getNextRoundNumber(storyId));
   saveState();
   render();
+}
+
+function getNextRoundNumber(storyId) {
+  const historyRound = (state.voteHistory || [])
+    .filter((entry) => entry.storyId === storyId)
+    .reduce((highest, entry) => Math.max(highest, Number(entry.roundNumber) || 0), 0);
+  const currentRound = state.round.storyId === storyId ? Number(state.round.roundNumber) || 0 : 0;
+  return Math.max(historyRound, currentRound) + 1;
+}
+
+function revoteStory(storyId) {
+  const story = state.stories.find((candidate) => candidate.id === storyId && candidate.type !== 'Epic');
+  if (!story) return;
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can start a revote');
+    return;
+  }
+  if (state.round.phase === 'voting') {
+    showToast('Finish or reset the current voting round first');
+    return;
+  }
+  recordCurrentRoundHistory();
+  state.selectedStoryId = story.id;
+  state.round = makeRound(story.id, state.roomSettings.voteMode, getNextRoundNumber(story.id));
+  saveState();
+  render();
+  showToast(`Revote ready for ${story.title}`);
 }
 
 function selectEpic(epicId) {
@@ -2184,16 +2248,23 @@ function moveStory(storyId, direction) {
 
 function deleteStory(storyId) {
   if (state.stories.length <= 1) {
-    showToast('Keep at least one story in the room');
+    showToast('Keep at least one story or epic in the room');
     return;
   }
   const index = state.stories.findIndex((story) => story.id === storyId);
   if (index < 0) return;
-  if (state.stories[index].type === 'Epic' && state.stories.some((story) => story.epicId === storyId)) {
-    showToast('Unlink the epic’s child stories before removing it');
-    return;
-  }
+  const story = state.stories[index];
+  const linkedChildren = story.type === 'Epic'
+    ? state.stories.filter((candidate) => candidate.epicId === storyId)
+    : [];
+  const confirmation = story.type === 'Epic' && linkedChildren.length
+    ? `Delete “${story.title}”? Its ${linkedChildren.length} linked ${linkedChildren.length === 1 ? 'story will' : 'stories will'} stay in the queue but become unlinked.`
+    : `Delete “${story.title}” from the queue? Its estimate history will be removed from this room.`;
+  if (!window.confirm(confirmation)) return;
   const [removed] = state.stories.splice(index, 1);
+  if (removed.type === 'Epic') {
+    state.stories = state.stories.map((candidate) => candidate.epicId === storyId ? { ...candidate, epicId: null } : candidate);
+  }
   if (state.selectedStoryId === storyId) {
     state.selectedStoryId = state.stories[Math.min(index, state.stories.length - 1)].id;
   }
@@ -2202,7 +2273,7 @@ function deleteStory(storyId) {
   }
   saveState();
   render();
-  showToast(`${removed.title} removed from the queue`);
+  showToast(`${removed.type === 'Epic' ? 'Epic' : 'Story'} deleted from the queue`);
 }
 
 function startVoting() {
@@ -2249,7 +2320,7 @@ function updateVote(type, value) {
   vote[type] = normalizeEstimate(value);
   if (type === 'ai') vote.aiEnabled = true;
   state.round.votes[cloud.user?.id || participantId] = vote;
-  saveState();
+  persistLocalState();
   syncSiteVote();
   render();
 }
@@ -2375,11 +2446,11 @@ function resetRound() {
     return;
   }
   recordCurrentRoundHistory();
-  state.round = makeRound(state.selectedStoryId, state.roomSettings.voteMode, state.round.roundNumber + 1);
+  state.round = makeRound(state.selectedStoryId, state.roomSettings.voteMode, getNextRoundNumber(state.selectedStoryId));
   saveState();
   clearSiteVotes();
   render();
-  showToast('New voting round ready');
+  showToast('Revote ready for this story');
 }
 
 function skipStory() {
@@ -2392,7 +2463,7 @@ function skipStory() {
   const currentIndex = stories.findIndex((story) => story.id === state.selectedStoryId);
   const nextStory = stories[(currentIndex + 1 + stories.length) % stories.length];
   state.selectedStoryId = nextStory.id;
-  state.round = makeRound(nextStory.id, state.roomSettings.voteMode, state.round.roundNumber + 1);
+  state.round = makeRound(nextStory.id, state.roomSettings.voteMode, getNextRoundNumber(nextStory.id));
   saveState();
   clearSiteVotes();
   render();
@@ -2699,8 +2770,10 @@ function siteStatePayload() {
 }
 
 function rememberRemoteSiteState(payload) {
+  if (payload?.room && Number.isFinite(Number(payload.room.stateVersion))) {
+    siteRuntime.serverStateVersion = Math.max(0, Number(payload.room.stateVersion));
+  }
   if (!payload?.state || !Array.isArray(payload.state.stories)) return;
-  siteRuntime.serverStateVersion = Number(payload.room?.stateVersion) || 0;
   siteRuntime.baseState = structuredClone(payload.state);
 }
 
@@ -2801,19 +2874,52 @@ function applySiteState(remoteState) {
 }
 
 function stopSiteRealtime() {
-  siteRuntime.eventSource?.close();
-  siteRuntime.eventSource = null;
+  const socket = siteRuntime.socket;
+  siteRuntime.socket = null;
+  if (socket) {
+    try {
+      socket.close();
+    } catch {
+      // The socket may already have closed.
+    }
+  }
   if (siteRuntime.realtimeRetryTimer) {
     clearTimeout(siteRuntime.realtimeRetryTimer);
     siteRuntime.realtimeRetryTimer = null;
   }
+  siteRuntime.realtimeRetryDelay = 1000;
+  siteRuntime.pendingRealtimeState = null;
+}
+
+function flushPendingRealtimeState() {
+  const payload = siteRuntime.pendingRealtimeState;
+  if (!payload || hasActiveEditor() || siteStateHasPendingChanges()) return;
+  siteRuntime.pendingRealtimeState = null;
+  applyRealtimeState(payload);
 }
 
 function applyRealtimeState(payload) {
-  if (!siteRuntime.ready || !payload?.state || siteStateHasPendingChanges() || hasActiveEditor()) return;
+  if (!siteRuntime.ready || !payload?.state) return;
+  if (hasActiveEditor() || siteStateHasPendingChanges()) {
+    siteRuntime.pendingRealtimeState = payload;
+    return;
+  }
+  const remoteVersion = Number(payload.room?.stateVersion);
+  if (Number.isFinite(remoteVersion) && remoteVersion < siteRuntime.serverStateVersion) return;
+  const localRound = state.round;
+  const preserveLocalVote = siteRuntime.voteSyncInFlight > 0
+    && localRound?.phase === 'voting'
+    && payload.state.round?.phase === 'voting'
+    && localRound.storyId === payload.state.round.storyId
+    && Number(localRound.roundNumber) === Number(payload.state.round.roundNumber);
+  const localVote = preserveLocalVote ? getOwnVote() : null;
   cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
   if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
   if (!applySiteState(payload.state)) return;
+  if (localVote) {
+    state.round.votes[getVoteIdentity()] = localVote;
+    state.round.submittedCount = Math.max(state.round.submittedCount || 0, getRoundVotes().length);
+  }
   rememberRemoteSiteState(payload);
   persistLocalState();
   cloud.status = 'synced';
@@ -2821,34 +2927,81 @@ function applyRealtimeState(payload) {
   render();
 }
 
-function startSiteRealtime() {
-  if (!siteRuntime.ready || !window.EventSource) return;
+async function handleRealtimeRoomDeleted() {
+  const deletedRoomId = cloud.roomId;
   stopSiteRealtime();
-  const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
-  const source = new EventSource(`/api/state/stream${roomId}`);
-  siteRuntime.eventSource = source;
-  source.addEventListener('open', () => {
-    cloud.status = 'synced';
+  cloud.rooms = cloud.rooms.filter((room) => room.id !== deletedRoomId);
+  await refreshWorkspaceData();
+  const fallback = cloud.rooms[0];
+  if (!fallback) {
+    activeView = 'rooms';
+    render();
+    showToast('This room was deleted');
+    return;
+  }
+  await selectRoom(fallback.id);
+  showToast('This room was deleted — switched to another room');
+}
+
+function startSiteRealtime() {
+  if (!siteRuntime.ready) return;
+  stopSiteRealtime();
+  if (!window.WebSocket) {
+    cloud.status = 'error';
     updateCloudStatusBadge();
-  });
-  source.addEventListener('state', (event) => {
-    try {
-      applyRealtimeState(JSON.parse(event.data));
-    } catch (error) {
-      console.warn('Pointline realtime state message was invalid', error);
-    }
-  });
-  source.addEventListener('error', () => {
-    if (siteRuntime.eventSource !== source) return;
-    cloud.status = 'connecting';
-    updateCloudStatusBadge();
-    if (!siteRuntime.realtimeRetryTimer) {
-      siteRuntime.realtimeRetryTimer = window.setTimeout(async () => {
+    return;
+  }
+
+  const connect = () => {
+    if (!siteRuntime.ready || siteRuntime.socket) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
+    const socket = new WebSocket(`${protocol}//${window.location.host}/api/state/socket${roomId}`);
+    siteRuntime.socket = socket;
+
+    const scheduleReconnect = () => {
+      if (!siteRuntime.ready || siteRuntime.socket !== socket || siteRuntime.realtimeRetryTimer) return;
+      siteRuntime.socket = null;
+      cloud.status = 'connecting';
+      updateCloudStatusBadge();
+      const delay = siteRuntime.realtimeRetryDelay;
+      siteRuntime.realtimeRetryDelay = Math.min(delay * 2, 15000);
+      siteRuntime.realtimeRetryTimer = window.setTimeout(() => {
         siteRuntime.realtimeRetryTimer = null;
-        await refreshSiteState({ renderAfter: false });
-      }, 15000);
-    }
-  });
+        connect();
+      }, delay);
+    };
+
+    socket.addEventListener('open', () => {
+      if (siteRuntime.socket !== socket) return;
+      siteRuntime.realtimeRetryDelay = 1000;
+      cloud.status = 'synced';
+      updateCloudStatusBadge();
+      flushPendingRealtimeState();
+    });
+    socket.addEventListener('message', (event) => {
+      if (siteRuntime.socket !== socket) return;
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'state') applyRealtimeState(message);
+        if (message.type === 'room-deleted') handleRealtimeRoomDeleted();
+      } catch (error) {
+        console.warn('Pointline realtime state message was invalid', error);
+      }
+    });
+    socket.addEventListener('error', () => {
+      if (siteRuntime.socket !== socket) return;
+      scheduleReconnect();
+      try {
+        socket.close();
+      } catch {
+        // The socket may already have closed.
+      }
+    });
+    socket.addEventListener('close', scheduleReconnect);
+  };
+
+  connect();
 }
 
 function hasActiveEditor() {
@@ -2859,38 +3012,17 @@ function hasActiveEditor() {
   );
 }
 
-async function refreshSiteState({ renderAfter = true } = {}) {
-  if (!siteRuntime.ready || siteRuntime.refreshing || siteStateHasPendingChanges()) return;
-  siteRuntime.refreshing = true;
-  try {
-    const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
-    const payload = await siteRequest(`/api/state${roomId}`);
-    cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
-    if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
-    if (applySiteState(payload.state)) {
-      rememberRemoteSiteState(payload);
-      persistLocalState();
-    }
-    cloud.status = 'synced';
-    if (renderAfter && !hasActiveEditor()) render();
-    else updateCloudStatusBadge();
-  } catch (error) {
-    if (handleSessionExpired(error)) return;
-    cloud.status = error.status === 401 ? 'auth' : 'error';
-    updateCloudStatusBadge();
-    if (error.status !== 401) console.warn('Pointline Site state refresh failed', error);
-  } finally {
-    siteRuntime.refreshing = false;
-  }
-}
-
-function siteStateHasPendingChanges() {
+function siteStateWritePending() {
   return Boolean(
     siteRuntime.saveTimers.has(cloud.roomId) ||
     siteRuntime.saveChains.has(cloud.roomId) ||
     siteRuntime.saveInFlight > 0 ||
     (siteRuntime.revisionRoomId === cloud.roomId && siteRuntime.stateRevision > siteRuntime.syncedRevision),
   );
+}
+
+function siteStateHasPendingChanges() {
+  return siteStateWritePending() || siteRuntime.voteSyncInFlight > 0;
 }
 
 function queueSiteCloudSync() {
@@ -2901,11 +3033,10 @@ function queueSiteCloudSync() {
   if (existingTimer) clearTimeout(existingTimer);
   const timer = window.setTimeout(() => {
     siteRuntime.saveTimers.delete(roomId);
-    const revision = siteRuntime.stateRevision;
-    const shouldRefreshAfterReveal = state.round.phase === 'revealed';
-    const payload = JSON.stringify(siteStatePayload());
     const priorSave = siteRuntime.saveChains.get(roomId) || Promise.resolve();
     const save = priorSave.catch(() => {}).then(async () => {
+      const revision = siteRuntime.stateRevision;
+      const payload = JSON.stringify(siteStatePayload());
       siteRuntime.saveInFlight += 1;
       try {
         const saved = await siteRequest(roomScopedApiPath('/api/state', roomId), { method: 'PUT', body: payload });
@@ -2914,7 +3045,6 @@ function queueSiteCloudSync() {
           rememberRemoteSiteState(saved);
           cloud.status = 'synced';
           updateCloudStatusBadge();
-          if (shouldRefreshAfterReveal) window.setTimeout(() => refreshSiteState(), 0);
         }
       } catch (error) {
         if (error.status === 409) {
@@ -2949,45 +3079,111 @@ function queueSiteCloudSync() {
         }
       } finally {
         siteRuntime.saveInFlight -= 1;
+        flushPendingRealtimeState();
       }
     });
     siteRuntime.saveChains.set(roomId, save);
     save.then(() => {
       if (siteRuntime.saveChains.get(roomId) === save) siteRuntime.saveChains.delete(roomId);
+      flushPendingRealtimeState();
     }, () => {
       if (siteRuntime.saveChains.get(roomId) === save) siteRuntime.saveChains.delete(roomId);
+      flushPendingRealtimeState();
     });
   }, 250);
   siteRuntime.saveTimers.set(roomId, timer);
 }
 
-async function syncSiteVote(retry = 0) {
+async function setVoteParticipation(joined) {
   if (!siteRuntime.ready || state.round.phase !== 'voting') return;
-  const vote = getOwnVote();
+  const roomId = cloud.roomId;
+  const storyId = state.round.storyId;
+  const roundNumber = state.round.roundNumber;
+  if (!joined) {
+    siteRuntime.voteRevision += 1;
+    const pendingVote = siteRuntime.voteSaveChains.get(roomId);
+    if (pendingVote) await pendingVote.catch(() => {});
+  }
+  siteRuntime.voteSyncInFlight += 1;
   try {
-    const payload = await siteRequest(roomScopedApiPath('/api/vote'), {
+    const payload = await siteRequest(roomScopedApiPath('/api/round/participation', roomId), {
       method: 'PUT',
-      body: JSON.stringify({
-        storyId: state.round.storyId,
-        roundNumber: state.round.roundNumber,
-        manual: vote.manual,
-        ai: vote.ai,
-        aiEnabled: vote.aiEnabled,
-      }),
+      body: JSON.stringify({ storyId, roundNumber, joined }),
     });
-    state.round.votes[getVoteIdentity()] = vote;
-    state.round.submittedCount = Math.max(Number(payload.submittedCount) || 0, getRoundVotes().length);
-    persistLocalState();
-  } catch (error) {
-    if (error.status === 409 && retry === 0) {
-      window.setTimeout(() => syncSiteVote(1), 400);
-      return;
+    if (activeRoomId !== roomId || cloud.roomId !== roomId) return;
+    cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
+    if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
+    if (payload.state && applySiteState(payload.state)) {
+      rememberRemoteSiteState(payload);
+      persistLocalState();
     }
+    cloud.status = 'synced';
+    updateCloudStatusBadge();
+    render();
+  } catch (error) {
     if (handleSessionExpired(error)) return;
     cloud.status = error.status === 401 ? 'auth' : 'error';
     updateCloudStatusBadge();
-    console.warn('Pointline Site vote sync failed', error);
+    showToast(error.message || 'Voting participation could not be updated');
+    if (error.status !== 401) console.warn('Pointline voting participation sync failed', error);
+  } finally {
+    siteRuntime.voteSyncInFlight -= 1;
+    flushPendingRealtimeState();
   }
+}
+
+function syncSiteVote() {
+  if (!siteRuntime.ready || state.round.phase !== 'voting') return;
+  const roomId = cloud.roomId;
+  const vote = getOwnVote();
+  const storyId = state.round.storyId;
+  const roundNumber = state.round.roundNumber;
+  const revision = ++siteRuntime.voteRevision;
+  const priorSave = siteRuntime.voteSaveChains.get(roomId) || Promise.resolve();
+  siteRuntime.voteSyncInFlight += 1;
+  const save = priorSave.catch(() => {}).then(async () => {
+    try {
+      const payload = await siteRequest(roomScopedApiPath('/api/vote', roomId), {
+        method: 'PUT',
+        body: JSON.stringify({
+          storyId,
+          roundNumber,
+          manual: vote.manual,
+          ai: vote.ai,
+          aiEnabled: vote.aiEnabled,
+        }),
+      });
+      if (revision === siteRuntime.voteRevision && activeRoomId === roomId && cloud.roomId === roomId) {
+        state.round.votes[getVoteIdentity()] = vote;
+        state.round.submittedCount = Math.max(Number(payload.submittedCount) || 0, getRoundVotes().length);
+        persistLocalState();
+      }
+    } catch (error) {
+      if (error.status === 409 && revision === siteRuntime.voteRevision) {
+        cloud.status = 'synced';
+        updateCloudStatusBadge();
+        showToast(error.message || 'This voting round is no longer available');
+        return;
+      }
+      if (handleSessionExpired(error)) return;
+      if (revision === siteRuntime.voteRevision) {
+        cloud.status = error.status === 401 ? 'auth' : 'error';
+        updateCloudStatusBadge();
+      }
+      console.warn('Pointline Site vote sync failed', error);
+    } finally {
+      siteRuntime.voteSyncInFlight -= 1;
+      flushPendingRealtimeState();
+    }
+  });
+  siteRuntime.voteSaveChains.set(roomId, save);
+  save.then(() => {
+    if (siteRuntime.voteSaveChains.get(roomId) === save) siteRuntime.voteSaveChains.delete(roomId);
+    flushPendingRealtimeState();
+  }, () => {
+    if (siteRuntime.voteSaveChains.get(roomId) === save) siteRuntime.voteSaveChains.delete(roomId);
+    flushPendingRealtimeState();
+  });
 }
 
 async function clearSiteVotes() {
@@ -3046,11 +3242,18 @@ async function loadAuthenticatedSiteSession() {
     const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
     const payload = await siteRequest(`/api/state${roomId}`);
     cloud.memberCount = Math.max(1, Number(payload.memberCount) || cloud.memberCount);
+    rememberRemoteSiteState(payload);
     if (!applySiteState(payload.state)) {
-      const saved = await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      let saved;
+      try {
+        saved = await siteRequest(roomScopedApiPath('/api/state'), { method: 'PUT', body: JSON.stringify(siteStatePayload()) });
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        saved = await siteRequest(`/api/state${roomId}`);
+        if (!applySiteState(saved.state)) throw error;
+      }
       rememberRemoteSiteState(saved);
     } else {
-      rememberRemoteSiteState(payload);
       persistLocalState();
     }
     siteRuntime.syncedRevision = siteRuntime.stateRevision;
@@ -3411,6 +3614,7 @@ function setImportMode(mode) {
 function closeModal() {
   storyEditorDraft = null;
   document.querySelector('#modal-root').innerHTML = '';
+  flushPendingRealtimeState();
 }
 
 function showToast(message) {

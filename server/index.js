@@ -13,6 +13,7 @@ const PASSWORD_ITERATIONS = 100000;
 const MAX_BODY_BYTES = 1_500_000;
 const STATIC_ASSETS = new Map();
 const ROOM_STREAMS = new Map();
+const ROOM_SOCKETS = new Map();
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -698,8 +699,15 @@ async function readRoomState(db, roomId, userId) {
     };
 
   if (currentRound) {
-    const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM votes
+    const participantResult = await db.prepare(`SELECT account_id FROM planning_round_participants
       WHERE room_id = ? AND story_key = ? AND round_number = ?`)
+      .bind(roomId, round.storyId, round.roundNumber)
+      .all();
+    const participantIds = new Set(rows(participantResult).map((participant) => participant.account_id));
+    const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM votes v
+      JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
+        AND p.round_number = v.round_number AND p.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?`)
       .bind(roomId, round.storyId, round.roundNumber)
       .first();
     round.submittedCount = Number(countRow?.count) || 0;
@@ -713,7 +721,7 @@ async function readRoomState(db, roomId, userId) {
     const canSeeAllVotes = round.phase === 'revealed' || round.mode === 'open';
     const voteByPlayer = new Map(voteRows.map((vote) => [vote.account_id, vote]));
     round.votes = Object.fromEntries(voteRows
-      .filter((vote) => canSeeAllVotes || vote.account_id === userId)
+      .filter((vote) => participantIds.has(vote.account_id) && (canSeeAllVotes || vote.account_id === userId))
       .map((vote) => [vote.account_id, {
         name: vote.display_name || vote.email?.split('@')[0] || 'Planner',
         manual: parseScore(vote.manual_estimate),
@@ -721,14 +729,16 @@ async function readRoomState(db, roomId, userId) {
         aiEnabled: vote.ai_enabled === 1,
       }]));
     round.players = rows(memberRosterResult).map((member) => {
-      const vote = voteByPlayer.get(member.account_id);
-      const manual = parseScore(vote?.manual_estimate);
-      const ai = parseScore(vote?.ai_estimate);
+      const joined = participantIds.has(member.account_id);
+      const vote = joined ? voteByPlayer.get(member.account_id) : null;
+      const manual = joined ? parseScore(vote?.manual_estimate) : null;
+      const ai = joined ? parseScore(vote?.ai_estimate) : null;
       return {
         id: member.account_id,
         name: member.display_name || member.email?.split('@')[0] || 'Planner',
         role: member.role === 'owner' ? 'owner' : 'member',
-        hasVoted: manual !== null || ai !== null,
+        joined,
+        hasVoted: joined && (manual !== null || ai !== null),
         manual: canSeeAllVotes || member.account_id === userId ? manual : null,
         ai: canSeeAllVotes || member.account_id === userId ? ai : null,
         aiEnabled: vote?.ai_enabled === 1,
@@ -739,6 +749,7 @@ async function readRoomState(db, roomId, userId) {
       id: member.account_id,
       name: member.display_name || member.email?.split('@')[0] || 'Planner',
       role: member.role === 'owner' ? 'owner' : 'member',
+      joined: false,
       hasVoted: false,
       manual: null,
       ai: null,
@@ -799,16 +810,98 @@ async function readRoomState(db, roomId, userId) {
 }
 
 async function publishRoomState(db, roomId) {
-  const subscribers = ROOM_STREAMS.get(roomId);
-  if (!subscribers?.size) return;
-  await Promise.all([...subscribers].map(async (subscriber) => {
+  const streams = ROOM_STREAMS.get(roomId) || new Set();
+  const sockets = ROOM_SOCKETS.get(roomId) || new Set();
+  if (!streams.size && !sockets.size) return;
+  await Promise.all([
+    ...[...sockets].map(async (subscriber) => {
+      try {
+        const payload = await readRoomState(db, roomId, subscriber.userId);
+        if (subscriber.socket.readyState !== 1) {
+          subscriber.cleanup();
+          return;
+        }
+        subscriber.socket.send(JSON.stringify({ type: 'state', roomId, ...payload }));
+      } catch {
+        subscriber.cleanup();
+      }
+    }),
+    ...[...streams].map(async (subscriber) => {
     try {
       const payload = await readRoomState(db, roomId, subscriber.userId);
       subscriber.controller.enqueue(subscriber.encoder.encode(streamEvent('state', { roomId, ...payload })));
     } catch {
       subscriber.cleanup();
     }
-  }));
+    }),
+  ]);
+}
+
+function createRoomSocket(roomId, userId, socket, initialPayload) {
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    clearInterval(subscriber.heartbeat);
+    ROOM_SOCKETS.get(roomId)?.delete(subscriber);
+    if (!ROOM_SOCKETS.get(roomId)?.size) ROOM_SOCKETS.delete(roomId);
+  };
+  const subscriber = {
+    socket,
+    userId,
+    cleanup,
+    heartbeat: setInterval(() => {
+      try {
+        if (socket.readyState !== 1) {
+          cleanup();
+          return;
+        }
+        socket.send(JSON.stringify({ type: 'keep-alive' }));
+      } catch {
+        cleanup();
+      }
+    }, 25000),
+  };
+  socket.addEventListener('close', cleanup);
+  socket.addEventListener('error', cleanup);
+  socket.addEventListener('message', (event) => {
+    if (event.data !== 'ping' && event.data !== '{"type":"ping"}') return;
+    try {
+      socket.send(JSON.stringify({ type: 'pong' }));
+    } catch {
+      cleanup();
+    }
+  });
+  const subscribers = ROOM_SOCKETS.get(roomId) || new Set();
+  subscribers.add(subscriber);
+  ROOM_SOCKETS.set(roomId, subscribers);
+  try {
+    socket.send(JSON.stringify({ type: 'state', roomId, ...initialPayload }));
+  } catch {
+    cleanup();
+  }
+}
+
+function closeRoomSubscribers(roomId) {
+  for (const subscriber of ROOM_SOCKETS.get(roomId) || []) {
+    subscriber.cleanup();
+    try {
+      subscriber.socket.send(JSON.stringify({ type: 'room-deleted', roomId }));
+      subscriber.socket.close(1000, 'Room deleted');
+    } catch {
+      // The client may already have disconnected.
+    }
+  }
+  ROOM_SOCKETS.delete(roomId);
+  for (const subscriber of ROOM_STREAMS.get(roomId) || []) {
+    subscriber.cleanup();
+    try {
+      subscriber.controller.close();
+    } catch {
+      // The client may already have disconnected.
+    }
+  }
+  ROOM_STREAMS.delete(roomId);
 }
 
 function createRoomStream(roomId, userId, initialPayload) {
@@ -994,12 +1087,14 @@ async function saveRoomState(db, roomId, input, user) {
     ...(storyIds.length
       ? [
         db.prepare(`DELETE FROM votes WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
+        db.prepare(`DELETE FROM planning_round_participants WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
         db.prepare(`DELETE FROM planning_rounds WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
         db.prepare(`DELETE FROM story_service_allocations WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
         db.prepare(`DELETE FROM stories WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
       ]
       : [
         db.prepare('DELETE FROM votes WHERE room_id = ?').bind(roomId),
+        db.prepare('DELETE FROM planning_round_participants WHERE room_id = ?').bind(roomId),
         db.prepare('DELETE FROM planning_rounds WHERE room_id = ?').bind(roomId),
         db.prepare('DELETE FROM story_service_allocations WHERE room_id = ?').bind(roomId),
         db.prepare('DELETE FROM stories WHERE room_id = ?').bind(roomId),
@@ -1066,7 +1161,7 @@ async function createRoom(db, user, input) {
 
 async function deleteRoom(db, user, roomId) {
   if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
-    const error = new Error('The room to remove is invalid');
+    const error = new Error('The room to delete is invalid');
     error.status = 400;
     throw error;
   }
@@ -1077,7 +1172,7 @@ async function deleteRoom(db, user, roomId) {
     throw error;
   }
   if (user.role !== 'admin' && room.owner_account_id !== user.id) {
-    const error = new Error('Only the room owner can remove this room');
+    const error = new Error('Only the room owner can delete this room');
     error.status = 403;
     throw error;
   }
@@ -1089,6 +1184,7 @@ async function deleteRoom(db, user, roomId) {
   }
   await db.batch([
     db.prepare('DELETE FROM votes WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM planning_round_participants WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM planning_rounds WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM story_service_allocations WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM stories WHERE room_id = ?').bind(roomId),
@@ -1100,6 +1196,7 @@ async function deleteRoom(db, user, roomId) {
       ? db.prepare('DELETE FROM rooms WHERE id = ?').bind(roomId)
       : db.prepare('DELETE FROM rooms WHERE id = ? AND owner_account_id = ?').bind(roomId, user.id),
   ]);
+  closeRoomSubscribers(roomId);
   return { ok: true, roomId };
 }
 
@@ -1152,6 +1249,26 @@ async function createInvite(db, request, user, input) {
   return { token, kind, url: url.toString(), expiresAt };
 }
 
+async function handleRoomSocket(request, env) {
+  if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
+    return json({ error: 'WebSocket upgrade required' }, 426, { upgrade: 'websocket' });
+  }
+  const user = await getSessionUser(env.DB, request);
+  if (!user) return json({ error: 'Sign in with your Pointline username and password' }, 401);
+  await ensureDefaultRoomMembership(env.DB, user);
+  const roomId = roomIdFromRequest(request);
+  await requireMember(env.DB, roomId, user);
+  const room = await readRoomState(env.DB, roomId, user.id);
+  if (!room.room) return json({ error: 'Room not found' }, 404);
+
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const socket = pair[1];
+  socket.accept();
+  createRoomSocket(roomId, user.id, socket, room);
+  return new Response(null, { status: 101, webSocket: client });
+}
+
 async function acceptInvite(db, user, token) {
   const invite = await readInvite(db, token);
   if (!invite) {
@@ -1185,6 +1302,9 @@ async function acceptInvite(db, user, token) {
 async function handleApi(request, env) {
   if (!env.DB) return json({ error: 'The Pointline database binding is not configured' }, 500);
   const url = new URL(request.url);
+  if (url.pathname === '/api/state/socket' && request.method === 'GET') {
+    return handleRoomSocket(request, env);
+  }
   if (url.pathname === '/api/invites' && request.method === 'GET') {
     const invite = await readInvite(env.DB, cleanInviteToken(url.searchParams.get('token')));
     return invite ? json({ invite }) : json({ error: 'This invite link is missing or expired' }, 404);
@@ -1296,6 +1416,33 @@ async function handleApi(request, env) {
       },
     });
   }
+  if (url.pathname === '/api/round/participation' && request.method === 'PUT') {
+    const input = await readJson(request);
+    const storyId = cleanId(input.storyId);
+    const roundNumber = Number(input.roundNumber);
+    const round = await env.DB.prepare(`SELECT phase FROM planning_rounds
+      WHERE room_id = ? AND story_key = ? AND round_number = ? LIMIT 1`)
+      .bind(roomId, storyId, roundNumber)
+      .first();
+    if (!round || round.phase !== 'voting') return json({ error: 'Join or leave only while voting is in progress' }, 409);
+    if (input.joined === true) {
+      await env.DB.prepare(`INSERT OR IGNORE INTO planning_round_participants
+        (room_id, story_key, round_number, account_id, joined_at)
+        VALUES (?, ?, ?, ?, ?)`)
+        .bind(roomId, storyId, roundNumber, user.id, new Date().toISOString())
+        .run();
+    } else {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM votes WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
+          .bind(roomId, storyId, roundNumber, user.id),
+        env.DB.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
+          .bind(roomId, storyId, roundNumber, user.id),
+      ]);
+    }
+    const room = await readRoomState(env.DB, roomId, user.id);
+    await publishRoomState(env.DB, roomId);
+    return json({ ok: true, roomId, ...room });
+  }
   if (url.pathname === '/api/state' && request.method === 'PUT') {
     await saveRoomState(env.DB, roomId, await readJson(request), user);
     const room = await readRoomState(env.DB, roomId, user.id);
@@ -1311,6 +1458,11 @@ async function handleApi(request, env) {
       .bind(roomId, storyId, roundNumber)
       .first();
     if (!round || round.phase !== 'voting') return json({ error: 'This voting round is no longer accepting votes' }, 409);
+    const participant = await env.DB.prepare(`SELECT 1 AS joined FROM planning_round_participants
+      WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ? LIMIT 1`)
+      .bind(roomId, storyId, roundNumber, user.id)
+      .first();
+    if (!participant) return json({ error: 'Join this voting round before choosing a card' }, 409);
     const story = await env.DB.prepare('SELECT type FROM stories WHERE room_id = ? AND story_key = ? LIMIT 1')
       .bind(roomId, storyId)
       .first();
@@ -1332,8 +1484,10 @@ async function handleApi(request, env) {
         .bind(roomId, storyId, roundNumber, user.id, manual, ai, aiEnabled ? 1 : 0, new Date().toISOString())
         .run();
     }
-    const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM votes
-      WHERE room_id = ? AND story_key = ? AND round_number = ?`).bind(roomId, storyId, roundNumber).first();
+    const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM votes v
+      JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
+        AND p.round_number = v.round_number AND p.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?`).bind(roomId, storyId, roundNumber).first();
     await publishRoomState(env.DB, roomId);
     return json({ ok: true, submittedCount: Number(count?.count) || 0 });
   }
