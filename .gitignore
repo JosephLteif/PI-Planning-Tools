@@ -1,2 +1,4 @@
 node_modules/
 pointline-site.tar.gz
+frontend/dist/
+data/

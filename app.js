@@ -258,7 +258,7 @@ let cloud = {
 };
 
 const siteRuntime = {
-  enabled: window.location.hostname.endsWith('.chatgpt.site'),
+  enabled: window.location.hostname.endsWith('.chatgpt.site') || window.__POINTLINE_SELF_HOSTED__ === true,
   ready: false,
   socket: null,
   eventSource: null,

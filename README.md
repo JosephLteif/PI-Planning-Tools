@@ -4,13 +4,38 @@ Pointline is a lightweight PI planning estimation room with a team-owned estimat
 
 ## Run locally
 
-From PowerShell:
+From PowerShell, set local bootstrap credentials first:
 
 ```powershell
+$env:POINTLINE_BOOTSTRAP_ADMIN_USERNAME = 'admin'
+$env:POINTLINE_BOOTSTRAP_ADMIN_PASSWORD = 'replace-with-a-random-password'
 .\start-pointline.ps1
 ```
 
-Open [http://localhost:4174/](http://localhost:4174/). The local server is a browser-only demo; durable accounts and shared data are enabled on the hosted Site.
+Open [http://localhost:8787/](http://localhost:8787/). Local accounts and room data are stored in `data/pointline.sqlite`.
+
+## Self-host with Docker
+
+Copy `.env.example` to `.env`, replace the bootstrap password, and start the persistent container:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+Open [http://localhost:8787/](http://localhost:8787/). Accounts and room data are stored in the `pointline-data` Docker volume. The bootstrap credentials create the first admin account on first sign-in.
+
+To hand someone the built image instead of the source, run `docker save -o pointline.tar pointline:latest`; they can load it with `docker load -i pointline.tar` and run it with the same environment variables and `/data` volume.
+
+## Application stack
+
+- React and Vite provide the frontend build and browser entrypoint.
+- Node and Fastify provide the Docker HTTP server.
+- Drizzle defines the relational schema and migrations.
+- SQLite is the default database stored at `/data/pointline.sqlite`.
+- Set `DATABASE_URL` to use the PostgreSQL adapter and generated PostgreSQL migration instead.
+
+The React bundle is used by both the Docker server and the hosted Site entrypoint. The existing Worker handler remains the shared API/business-logic layer, so the hosted API contract stays compatible with existing rooms and data.
 
 ## Hosted accounts and persistence
 
@@ -24,7 +49,7 @@ After sign-in:
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in D1;
 - votes are stored per account, story, and round;
 - hidden rounds return only your own vote plus the submitted count; open and revealed rounds return the room’s votes;
-- the browser polls the room while open so teammates can estimate the same story concurrently.
+- the browser subscribes to the room state stream while open so teammates can estimate the same story concurrently.
 
 The Estimates view keeps one active story in focus for the room. Each participant can submit a separate vote for that story, and hidden votes remain private until the round is revealed.
 

@@ -1,0 +1,17 @@
+services:
+  pointline:
+    build: .
+    image: pointline:latest
+    environment:
+      POINTLINE_BOOTSTRAP_ADMIN_USERNAME: ${POINTLINE_BOOTSTRAP_ADMIN_USERNAME:?required}
+      POINTLINE_BOOTSTRAP_ADMIN_PASSWORD: ${POINTLINE_BOOTSTRAP_ADMIN_PASSWORD:?required}
+      # Set DATABASE_URL to use PostgreSQL instead of the default SQLite volume.
+      DATABASE_URL: ${DATABASE_URL:-}
+    ports:
+      - "${POINTLINE_PORT:-8787}:8787"
+    volumes:
+      - pointline-data:/data
+    restart: unless-stopped
+
+volumes:
+  pointline-data:

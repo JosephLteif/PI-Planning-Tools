@@ -106,8 +106,13 @@ async function getSessionUser(db, request) {
   return account ? accountUser(account) : null;
 }
 
-function sessionCookie(token, maxAge = SESSION_MAX_AGE_SECONDS) {
-  return `${SESSION_COOKIE}=${token}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+function sessionCookie(token, maxAge = SESSION_MAX_AGE_SECONDS, secure = true) {
+  return `${SESSION_COOKIE}=${token}; Max-Age=${maxAge}; Path=/; HttpOnly${secure ? '; Secure' : ''}; SameSite=Lax`;
+}
+
+function isSecureRequest(request) {
+  const forwardedProtocol = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  return new URL(request.url).protocol === 'https:' || forwardedProtocol === 'https';
 }
 
 function authError(message, status = 400) {
@@ -364,8 +369,8 @@ async function ensureBootstrapAdmin(db, env) {
         (id, email, display_name, username, password_hash, password_salt, role, disabled, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 'admin', 0, ?, ?)`)
         .bind(accountId, `${username}@pointline.local`, 'Pointline Admin', username, passwordRecord.hash, passwordRecord.salt, now, now),
-    db.prepare(`INSERT OR IGNORE INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?)`)
+    db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?) ON CONFLICT DO NOTHING`)
       .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, accountId, now, now),
     db.prepare('UPDATE rooms SET owner_account_id = ? WHERE id = ?').bind(accountId, DEFAULT_ROOM_ID),
     db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
@@ -386,8 +391,8 @@ async function ensureDefaultRoomMembership(db, user) {
       .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, now, now)
       .run();
   }
-  await db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-    VALUES (?, ?, 'editor', ?)`)
+  await db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+    VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
     .bind(DEFAULT_ROOM_ID, user.id, new Date().toISOString())
     .run();
 }
@@ -426,7 +431,7 @@ async function login(db, env, input) {
 async function logout(db, request) {
   const token = requestCookie(request, SESSION_COOKIE);
   if (token) await db.prepare('DELETE FROM sessions WHERE id = ?').bind(await sha256Base64Url(token)).run();
-  return json({ ok: true }, 200, { 'set-cookie': sessionCookie('', 0) });
+  return json({ ok: true }, 200, { 'set-cookie': sessionCookie('', 0, isSecureRequest(request)) });
 }
 
 function requireAdmin(user) {
@@ -459,8 +464,8 @@ async function createManagedUser(db, user, input) {
       (id, email, display_name, username, password_hash, password_salt, role, disabled, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'member', 0, ?, ?)`)
       .bind(accountId, `${username}@pointline.local`, displayName, username, passwordRecord.hash, passwordRecord.salt, now, now),
-    db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?)`)
+    db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
       .bind(DEFAULT_ROOM_ID, accountId, now),
   ]);
   return {
@@ -587,8 +592,8 @@ async function addTeamMember(db, user, teamId, accountId) {
   }
   const account = await db.prepare('SELECT id FROM accounts WHERE id = ? AND disabled = 0 LIMIT 1').bind(accountId).first();
   if (!account) throw authError('Member not found', 404);
-  await db.prepare(`INSERT OR IGNORE INTO team_members (team_id, account_id, role, created_at)
-    VALUES (?, ?, 'member', ?)`).bind(teamId, accountId, new Date().toISOString()).run();
+  await db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
+    VALUES (?, ?, 'member', ?) ON CONFLICT DO NOTHING`).bind(teamId, accountId, new Date().toISOString()).run();
   const teams = await readTeams(db, user.id);
   return teams.find((candidate) => candidate.id === teamId) || null;
 }
@@ -601,14 +606,14 @@ async function addRoomMembers(db, user, roomId, input) {
   const now = new Date().toISOString();
   if (teamId) {
     await requireTeamMember(db, teamId, user.id);
-    await db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ?`)
+    await db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ? ON CONFLICT DO NOTHING`)
       .bind(roomId, now, teamId).run();
   } else {
     const account = await db.prepare('SELECT id FROM accounts WHERE id = ? AND disabled = 0 LIMIT 1').bind(accountId).first();
     if (!account) throw authError('Member not found', 404);
-    await db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?)`).bind(roomId, accountId, now).run();
+    await db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`).bind(roomId, accountId, now).run();
   }
   return readRoomState(db, roomId, user.id);
 }
@@ -1154,9 +1159,9 @@ async function saveRoomState(db, roomId, input, user) {
         mode = excluded.mode, revealed_at = excluded.revealed_at, timer_ends_at = excluded.timer_ends_at, timer_started_at = excluded.timer_started_at, updated_at = excluded.updated_at`)
       .bind(roomId, source.round.storyId, source.round.roundNumber, source.round.phase, source.round.storageMode, source.round.revealedAt, source.round.timerEndsAt, source.round.timerStartedAt, now));
     if (source.round.phase === 'voting') {
-      statements.push(db.prepare(`INSERT OR IGNORE INTO planning_round_participants
+      statements.push(db.prepare(`INSERT INTO planning_round_participants
         (room_id, story_key, round_number, account_id, joined_at)
-        SELECT room_id, ?, ?, account_id, joined_at FROM room_voting_members WHERE room_id = ?`)
+        SELECT room_id, ?, ?, account_id, joined_at FROM room_voting_members WHERE room_id = ? ON CONFLICT DO NOTHING`)
         .bind(source.round.storyId, source.round.roundNumber, roomId));
     }
   }
@@ -1307,19 +1312,19 @@ async function acceptInvite(db, user, token) {
   const now = new Date().toISOString();
   const statements = [];
   if (invite.kind === 'team') {
-    statements.push(db.prepare(`INSERT OR IGNORE INTO team_members (team_id, account_id, role, created_at)
-      VALUES (?, ?, 'member', ?)`)
+    statements.push(db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
+      VALUES (?, ?, 'member', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.team.id, user.id, now));
   } else if (invite.kind === 'room-team') {
-    statements.push(db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ?`)
+    statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ? ON CONFLICT DO NOTHING`)
       .bind(invite.room.id, now, invite.team.id));
-    statements.push(db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?)`)
+    statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.room.id, user.id, now));
   } else {
-    statements.push(db.prepare(`INSERT OR IGNORE INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?)`)
+    statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.room.id, user.id, now));
   }
   await db.batch(statements);
@@ -1339,7 +1344,7 @@ async function handleApi(request, env) {
   }
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     const result = await login(env.DB, env, await readJson(request));
-    return json({ ok: true, user: result.user }, 200, { 'set-cookie': sessionCookie(result.token) });
+    return json({ ok: true, user: result.user }, 200, { 'set-cookie': sessionCookie(result.token, SESSION_MAX_AGE_SECONDS, isSecureRequest(request)) });
   }
   const user = await getSessionUser(env.DB, request);
   if (url.pathname === '/api/auth/logout' && request.method === 'POST') return logout(env.DB, request);
@@ -1461,12 +1466,12 @@ async function handleApi(request, env) {
       if (!round || round.phase !== 'voting') return json({ error: 'Join is available while voting is in progress' }, 409);
       const now = new Date().toISOString();
       await env.DB.batch([
-        env.DB.prepare(`INSERT OR IGNORE INTO room_voting_members (room_id, account_id, joined_at)
-          VALUES (?, ?, ?)`)
+        env.DB.prepare(`INSERT INTO room_voting_members (room_id, account_id, joined_at)
+          VALUES (?, ?, ?) ON CONFLICT DO NOTHING`)
           .bind(roomId, user.id, now),
-        env.DB.prepare(`INSERT OR IGNORE INTO planning_round_participants
+        env.DB.prepare(`INSERT INTO planning_round_participants
           (room_id, story_key, round_number, account_id, joined_at)
-          VALUES (?, ?, ?, ?, ?)`)
+          VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`)
           .bind(roomId, storyId, roundNumber, user.id, now),
       ]);
     } else {
