@@ -136,6 +136,17 @@ function cleanText(value, fallback = '', maxLength = 5000) {
   return (text || fallback).slice(0, maxLength);
 }
 
+function cleanStoryUrl(value) {
+  const url = cleanText(value, '', 2048);
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+  } catch {
+    return '';
+  }
+}
+
 function cleanId(value, fallback = '') {
   const id = cleanText(value, fallback, 120);
   return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(id) ? id : fallback;
@@ -236,6 +247,7 @@ function normalizeStateInput(input) {
       type: cleanText(story?.type, 'Feature', 80),
       epicId: cleanId(story?.epicId) || null,
       title: cleanText(story?.title, 'Untitled story', 500),
+      url: cleanStoryUrl(story?.url),
       description: cleanText(story?.description, 'A new story ready for the team to shape and estimate together.', 5000),
       acceptance: parseAcceptance(story?.acceptance),
       manual: story?.type === 'Epic' ? null : parseScore(story?.manual),
@@ -604,10 +616,10 @@ async function readRoomState(db, roomId, userId) {
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
 
-  const [domainResult, serviceResult, storyResult, allocationResult, memberResult, voteHistoryResult, memberRosterResult] = await Promise.all([
+  const [domainResult, serviceResult, storyResult, allocationResult, memberResult, voteHistoryResult, memberRosterResult, votingMemberResult] = await Promise.all([
     db.prepare('SELECT id, name, sort_order FROM domains WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare('SELECT id, name, domain_id, sort_order FROM services WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
-    db.prepare(`SELECT story_key, type, epic_id, title, description, acceptance_json, sort_order,
+    db.prepare(`SELECT story_key, type, epic_id, title, url, description, acceptance_json, sort_order,
       manual_estimate, ai_estimate, ai_enabled, saved
       FROM stories WHERE room_id = ? ORDER BY sort_order, story_key`).bind(roomId).all(),
     db.prepare(`SELECT story_key, service_id, allocation_pct
@@ -624,6 +636,7 @@ async function readRoomState(db, roomId, userId) {
     db.prepare(`SELECT rm.account_id, rm.role, a.display_name, a.email
       FROM room_members rm LEFT JOIN accounts a ON a.id = rm.account_id
       WHERE rm.room_id = ? ORDER BY rm.role DESC, a.display_name, a.email`).bind(roomId).all(),
+    db.prepare('SELECT account_id FROM room_voting_members WHERE room_id = ?').bind(roomId).all(),
   ]);
 
   const domains = rows(domainResult).map((domain) => ({ id: domain.id, name: domain.name }));
@@ -650,6 +663,7 @@ async function readRoomState(db, roomId, userId) {
       type: story.type || 'Feature',
       epicId: story.epic_id || null,
       title: story.title,
+      url: cleanStoryUrl(story.url),
       description: story.description || 'A new story ready for the team to shape and estimate together.',
       acceptance,
       manual: parseScore(story.manual_estimate),
@@ -663,6 +677,7 @@ async function readRoomState(db, roomId, userId) {
   const selectedStoryId = stories.some((story) => story.id === room.selected_story_key)
     ? room.selected_story_key
     : stories[0]?.id || null;
+  const votingMemberIds = new Set(rows(votingMemberResult).map((member) => member.account_id));
   let currentRound = null;
   if (selectedStoryId) {
     currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at, timer_started_at
@@ -704,6 +719,7 @@ async function readRoomState(db, roomId, userId) {
       .bind(roomId, round.storyId, round.roundNumber)
       .all();
     const participantIds = new Set(rows(participantResult).map((participant) => participant.account_id));
+    const activeParticipantIds = new Set([...votingMemberIds, ...participantIds]);
     const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM votes v
       JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
         AND p.round_number = v.round_number AND p.account_id = v.account_id
@@ -721,7 +737,7 @@ async function readRoomState(db, roomId, userId) {
     const canSeeAllVotes = round.phase === 'revealed' || round.mode === 'open';
     const voteByPlayer = new Map(voteRows.map((vote) => [vote.account_id, vote]));
     round.votes = Object.fromEntries(voteRows
-      .filter((vote) => participantIds.has(vote.account_id) && (canSeeAllVotes || vote.account_id === userId))
+      .filter((vote) => activeParticipantIds.has(vote.account_id) && (canSeeAllVotes || vote.account_id === userId))
       .map((vote) => [vote.account_id, {
         name: vote.display_name || vote.email?.split('@')[0] || 'Planner',
         manual: parseScore(vote.manual_estimate),
@@ -729,7 +745,7 @@ async function readRoomState(db, roomId, userId) {
         aiEnabled: vote.ai_enabled === 1,
       }]));
     round.players = rows(memberRosterResult).map((member) => {
-      const joined = participantIds.has(member.account_id);
+      const joined = activeParticipantIds.has(member.account_id);
       const vote = joined ? voteByPlayer.get(member.account_id) : null;
       const manual = joined ? parseScore(vote?.manual_estimate) : null;
       const ai = joined ? parseScore(vote?.ai_estimate) : null;
@@ -739,6 +755,8 @@ async function readRoomState(db, roomId, userId) {
         role: member.role === 'owner' ? 'owner' : 'member',
         joined,
         hasVoted: joined && (manual !== null || ai !== null),
+        manualSubmitted: joined && manual !== null,
+        aiSubmitted: joined && ai !== null,
         manual: canSeeAllVotes || member.account_id === userId ? manual : null,
         ai: canSeeAllVotes || member.account_id === userId ? ai : null,
         aiEnabled: vote?.ai_enabled === 1,
@@ -749,8 +767,10 @@ async function readRoomState(db, roomId, userId) {
       id: member.account_id,
       name: member.display_name || member.email?.split('@')[0] || 'Planner',
       role: member.role === 'owner' ? 'owner' : 'member',
-      joined: false,
+      joined: votingMemberIds.has(member.account_id),
       hasVoted: false,
+      manualSubmitted: false,
+      aiSubmitted: false,
       manual: null,
       ai: null,
       aiEnabled: false,
@@ -1108,13 +1128,13 @@ async function saveRoomState(db, roomId, input, user) {
       ON CONFLICT(room_id, id) DO UPDATE SET name = excluded.name, domain_id = excluded.domain_id, sort_order = excluded.sort_order, active = 1`)
       .bind(roomId, service.id, service.name, service.domainId || null, index)),
     ...source.stories.map((story, index) => db.prepare(`INSERT INTO stories
-      (room_id, story_key, type, epic_id, title, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (room_id, story_key, type, epic_id, title, url, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id, story_key) DO UPDATE SET type = excluded.type, title = excluded.title,
-        epic_id = excluded.epic_id, description = excluded.description, acceptance_json = excluded.acceptance_json, sort_order = excluded.sort_order,
+        epic_id = excluded.epic_id, url = excluded.url, description = excluded.description, acceptance_json = excluded.acceptance_json, sort_order = excluded.sort_order,
         manual_estimate = excluded.manual_estimate, ai_estimate = excluded.ai_estimate,
         ai_enabled = excluded.ai_enabled, saved = excluded.saved`)
-      .bind(roomId, story.id, story.type, story.epicId, story.title, story.description, JSON.stringify(story.acceptance), index,
+      .bind(roomId, story.id, story.type, story.epicId, story.title, story.url || null, story.description, JSON.stringify(story.acceptance), index,
         story.manual, story.ai, story.aiEnabled ? 1 : 0, story.saved ? 1 : 0)),
     ...source.stories.map((story) => db.prepare('DELETE FROM story_service_allocations WHERE room_id = ? AND story_key = ?')
       .bind(roomId, story.id)),
@@ -1131,6 +1151,12 @@ async function saveRoomState(db, roomId, input, user) {
       ON CONFLICT(room_id, story_key, round_number) DO UPDATE SET phase = excluded.phase,
         mode = excluded.mode, revealed_at = excluded.revealed_at, timer_ends_at = excluded.timer_ends_at, timer_started_at = excluded.timer_started_at, updated_at = excluded.updated_at`)
       .bind(roomId, source.round.storyId, source.round.roundNumber, source.round.phase, source.round.storageMode, source.round.revealedAt, source.round.timerEndsAt, source.round.timerStartedAt, now));
+    if (source.round.phase === 'voting') {
+      statements.push(db.prepare(`INSERT OR IGNORE INTO planning_round_participants
+        (room_id, story_key, round_number, account_id, joined_at)
+        SELECT room_id, ?, ?, account_id, joined_at FROM room_voting_members WHERE room_id = ?`)
+        .bind(source.round.storyId, source.round.roundNumber, roomId));
+    }
   }
 
   await runBatches(db, statements);
@@ -1420,24 +1446,39 @@ async function handleApi(request, env) {
     const input = await readJson(request);
     const storyId = cleanId(input.storyId);
     const roundNumber = Number(input.roundNumber);
+    const targetAccountId = cleanId(input.accountId) || user.id;
+    if (targetAccountId !== user.id && !(await canManageRoom(env.DB, roomId, user))) {
+      throw authError('Only the room owner or an admin can remove another voter', 403);
+    }
     const round = await env.DB.prepare(`SELECT phase FROM planning_rounds
       WHERE room_id = ? AND story_key = ? AND round_number = ? LIMIT 1`)
       .bind(roomId, storyId, roundNumber)
       .first();
-    if (!round || round.phase !== 'voting') return json({ error: 'Join or leave only while voting is in progress' }, 409);
     if (input.joined === true) {
-      await env.DB.prepare(`INSERT OR IGNORE INTO planning_round_participants
-        (room_id, story_key, round_number, account_id, joined_at)
-        VALUES (?, ?, ?, ?, ?)`)
-        .bind(roomId, storyId, roundNumber, user.id, new Date().toISOString())
-        .run();
-    } else {
+      if (targetAccountId !== user.id) return json({ error: 'Only a voter can join themselves' }, 400);
+      if (!round || round.phase !== 'voting') return json({ error: 'Join is available while voting is in progress' }, 409);
+      const now = new Date().toISOString();
       await env.DB.batch([
-        env.DB.prepare('DELETE FROM votes WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
-          .bind(roomId, storyId, roundNumber, user.id),
-        env.DB.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
-          .bind(roomId, storyId, roundNumber, user.id),
+        env.DB.prepare(`INSERT OR IGNORE INTO room_voting_members (room_id, account_id, joined_at)
+          VALUES (?, ?, ?)`)
+          .bind(roomId, user.id, now),
+        env.DB.prepare(`INSERT OR IGNORE INTO planning_round_participants
+          (room_id, story_key, round_number, account_id, joined_at)
+          VALUES (?, ?, ?, ?, ?)`)
+          .bind(roomId, storyId, roundNumber, user.id, now),
       ]);
+    } else {
+      const statements = [env.DB.prepare('DELETE FROM room_voting_members WHERE room_id = ? AND account_id = ?')
+        .bind(roomId, targetAccountId)];
+      if (round?.phase === 'voting' && storyId && Number.isInteger(roundNumber) && roundNumber > 0) {
+        statements.push(
+          env.DB.prepare('DELETE FROM votes WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
+            .bind(roomId, storyId, roundNumber, targetAccountId),
+          env.DB.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
+            .bind(roomId, storyId, roundNumber, targetAccountId),
+        );
+      }
+      await env.DB.batch(statements);
     }
     const room = await readRoomState(env.DB, roomId, user.id);
     await publishRoomState(env.DB, roomId);

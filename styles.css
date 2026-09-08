@@ -767,6 +767,13 @@ h1 {
   gap: 10px;
 }
 
+.story-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .story-type {
   display: inline-flex;
   align-items: center;
@@ -2304,6 +2311,10 @@ h1 {
   grid-template-columns: 27px minmax(0, 1fr) minmax(112px, auto);
 }
 
+.vote-player-row.has-player-action {
+  grid-template-columns: 27px minmax(0, 1fr) minmax(132px, auto) auto;
+}
+
 .vote-player-avatar {
   display: grid;
   width: 27px;
@@ -2360,16 +2371,21 @@ h1 {
 }
 
 .vote-player-values {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(58px, auto));
+  align-items: stretch;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 6px;
 }
 
 .vote-player-estimate {
   display: grid;
-  min-width: 34px;
+  min-width: 58px;
   gap: 2px;
+  padding: 3px 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
   text-align: right;
 }
 
@@ -2383,11 +2399,28 @@ h1 {
 .vote-player-estimate strong {
   color: var(--ink);
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 13px;
+  font-size: 10px;
 }
 
 .vote-player-estimate.ai strong {
   color: #b58119;
+}
+
+.vote-player-estimate.manual.is-submitted strong,
+.vote-player-estimate.ai.is-submitted strong {
+  color: var(--ink);
+}
+
+.vote-player-estimate.is-pending strong {
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 8px;
+}
+
+.vote-player-remove {
+  min-height: 26px;
+  padding-inline: 7px;
+  color: var(--coral);
 }
 
 .role-badge {
@@ -3732,6 +3765,10 @@ h1 {
 
   .vote-player-row.has-both-estimates {
     grid-template-columns: 27px minmax(0, 1fr) auto;
+  }
+
+  .vote-player-row.has-both-estimates.has-player-action {
+    grid-template-columns: 27px minmax(0, 1fr) auto auto;
   }
 
   .vote-player-values {
