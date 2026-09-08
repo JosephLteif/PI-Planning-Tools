@@ -155,6 +155,23 @@ export function addTeamMember(teamId: string, accountId: string) {
   });
 }
 
+export function removeTeamMember(teamId: string, accountId: string) {
+  return request<{ ok: true; team: Team | null }>(`/api/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(accountId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function promoteTeamOwner(teamId: string, accountId: string) {
+  return request<{ ok: true; team: Team | null }>(`/api/teams/${encodeURIComponent(teamId)}/owner`, {
+    method: 'POST',
+    body: { accountId },
+  });
+}
+
+export function deleteTeam(teamId: string) {
+  return request<{ ok: true; teamId: string }>(`/api/teams/${encodeURIComponent(teamId)}`, { method: 'DELETE' });
+}
+
 export function addRoomMember(roomId: string, input: { accountId?: string; teamId?: string }) {
   return request<{ ok: true; roomId: string; room: Room; memberCount: number }>(`/api/rooms/${encodeURIComponent(roomId)}/members`, {
     method: 'POST',

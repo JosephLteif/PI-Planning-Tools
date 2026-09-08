@@ -1,5 +1,6 @@
 import { ALLOWED_INVITE_KINDS, authError, cleanId, makeId } from './common.js';
 import { requireMember, requireTeamMember } from './access-service.js';
+import { assertSingleTeamMembership } from './team-service.js';
 import { publishRoomState } from './room-service.js';
 
 export async function readInvite(db, token) {
@@ -56,6 +57,7 @@ export async function acceptInvite(db, user, token) {
   const now = new Date().toISOString();
   const statements = [];
   if (invite.kind === 'team') {
+    await assertSingleTeamMembership(db, user.id, invite.team.id);
     statements.push(db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
       VALUES (?, ?, 'member', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.team.id, user.id, now));

@@ -19,7 +19,6 @@ type AppShellProps = {
 
 const primaryNavigation: Array<{ key: ViewKey; label: string; icon: string }> = [
   { key: 'estimates', label: 'Estimates', icon: '▦' },
-  { key: 'team', label: 'Team', icon: '♟' },
   { key: 'capacity', label: 'Capacity', icon: '◫' },
   { key: 'resources', label: 'Resources', icon: '▱' },
 ];
@@ -77,6 +76,9 @@ export function AppShell({
               <span className="icon" aria-hidden="true">◆</span><span className="nav-link-label">Admin</span>
             </button>
           ) : null}
+          <button className={`nav-link${view === 'team' ? ' active' : ''}`} type="button" onClick={() => onViewChange('team')}>
+            <span className="icon" aria-hidden="true">♟</span><span className="nav-link-label">Team</span>
+          </button>
         </nav>
         <div className="sidebar-user">
           <span className="avatar">{initials(name)}</span>

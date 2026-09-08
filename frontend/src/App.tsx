@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, saveRoomState, setParticipation, submitVote, updateAdminUser } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
@@ -286,6 +286,45 @@ export default function App() {
     }
   }
 
+  async function handleDeleteTeam(teamId: string) {
+    setSaving(true);
+    try {
+      await deleteTeam(teamId);
+      setTeams((current) => current.filter((team) => team.id !== teamId));
+      setNotice('Team deleted');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveTeamMember(teamId: string, accountId: string) {
+    setSaving(true);
+    try {
+      const result = await removeTeamMember(teamId, accountId);
+      if (result.team) setTeams((current) => current.map((team) => team.id === teamId ? result.team! : team));
+      setNotice('Team member removed');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handlePromoteTeamOwner(teamId: string, accountId: string) {
+    setSaving(true);
+    try {
+      const result = await promoteTeamOwner(teamId, accountId);
+      if (result.team) setTeams((current) => current.map((team) => team.id === teamId ? result.team! : team));
+      setNotice('Team owner updated');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleCreateInvite(teamId: string | undefined, kind: 'team' | 'room-team' | 'room-person'): Promise<string | null> {
     if (!selectedRoomId) return null;
     setSaving(true);
@@ -429,7 +468,7 @@ export default function App() {
       : view === 'rooms'
         ? <RoomsPage rooms={rooms} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
-          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} />
+          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
           : view === 'settings'
             ? <SettingsPage state={state} saving={saving} onSave={handleSave} />
             : view === 'capacity'

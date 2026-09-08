@@ -22,7 +22,7 @@ import {
   updateManagedUser,
 } from '../services/auth-service.js';
 import { canManageRoom, readDirectoryUsers, requireMember } from '../services/access-service.js';
-import { addTeamMember, createTeam, readTeams } from '../services/team-service.js';
+import { addTeamMember, createTeam, deleteTeam, promoteTeamOwner, readTeams, removeTeamMember } from '../services/team-service.js';
 import {
   addRoomMembers,
   createRoom,
@@ -76,6 +76,28 @@ export async function handleApiRequest(request, env) {
   if (url.pathname === '/api/teams' && request.method === 'POST') {
     const team = await createTeam(env.DB, user, await readJson(request));
     return json({ ok: true, team }, 201);
+  }
+
+  const teamPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)$/);
+  if (teamPathMatch && request.method === 'DELETE') {
+    const teamId = decodeURIComponent(teamPathMatch[1]);
+    return json(await deleteTeam(env.DB, user, teamId));
+  }
+
+  const teamMemberAccountPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)\/members\/([^/]+)$/);
+  if (teamMemberAccountPathMatch && request.method === 'DELETE') {
+    const teamId = decodeURIComponent(teamMemberAccountPathMatch[1]);
+    const accountId = decodeURIComponent(teamMemberAccountPathMatch[2]);
+    const team = await removeTeamMember(env.DB, user, teamId, cleanId(accountId));
+    return json({ ok: true, team });
+  }
+
+  const teamOwnerPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)\/owner$/);
+  if (teamOwnerPathMatch && request.method === 'POST') {
+    const teamId = decodeURIComponent(teamOwnerPathMatch[1]);
+    const input = await readJson(request);
+    const team = await promoteTeamOwner(env.DB, user, teamId, cleanId(input?.accountId));
+    return json({ ok: true, team });
   }
 
   const teamMemberPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)\/members$/);
