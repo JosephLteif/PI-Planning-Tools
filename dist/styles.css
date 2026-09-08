@@ -4118,6 +4118,8 @@ html[data-theme='dark'] .score-pill.ai {
 
 html[data-theme='dark'] .score-pill.manual {
   color: #14243a;
+  background: #e6f56a;
+  border-color: #b8ca39;
 }
 
 html[data-theme='dark'] .toggle {

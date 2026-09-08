@@ -2936,16 +2936,19 @@ function applyRealtimeState(payload) {
   const remoteVersion = Number(payload.room?.stateVersion);
   if (Number.isFinite(remoteVersion) && remoteVersion < siteRuntime.serverStateVersion) return;
   const localRound = state.round;
-  const preserveLocalVote = siteRuntime.voteSyncInFlight > 0
-    && localRound?.phase === 'voting'
+  const voteIdentity = getVoteIdentity();
+  const localVote = getOwnVote();
+  const remoteVote = normalizeVote(payload.state.round?.votes?.[voteIdentity]);
+  const preserveLocalVote = localRound?.phase === 'voting'
     && payload.state.round?.phase === 'voting'
     && localRound.storyId === payload.state.round.storyId
-    && Number(localRound.roundNumber) === Number(payload.state.round.roundNumber);
-  const localVote = preserveLocalVote ? getOwnVote() : null;
+    && Number(localRound.roundNumber) === Number(payload.state.round.roundNumber)
+    && Object.hasOwn(localRound.votes || {}, voteIdentity)
+    && (localVote.manual !== remoteVote.manual || localVote.ai !== remoteVote.ai || localVote.aiEnabled !== remoteVote.aiEnabled);
   cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
   if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
   if (!applySiteState(payload.state)) return;
-  if (localVote) {
+  if (preserveLocalVote) {
     state.round.votes[getVoteIdentity()] = localVote;
     state.round.submittedCount = Math.max(state.round.submittedCount || 0, getRoundVotes().length);
   }
