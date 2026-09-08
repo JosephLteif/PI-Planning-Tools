@@ -4,6 +4,7 @@ const ROOM_ID_KEY = 'pointline-room-id-v1';
 const WORKSPACE_KEY = 'pointline-workspace-v1';
 const THEME_KEY = 'pointline-theme-v1';
 const SIDEBAR_COLLAPSED_KEY = 'pointline-sidebar-collapsed-v1';
+const RESOURCE_TAB_KEY = 'pointline-resource-tab-v1';
 const LOCAL_DEFAULT_ROOM_ID = 'local-commerce';
 
 function loadTheme() {
@@ -22,8 +23,19 @@ function loadSidebarCollapsed() {
   }
 }
 
+function loadResourceTab() {
+  try {
+    return ['service', 'domain', 'epic'].includes(localStorage.getItem(RESOURCE_TAB_KEY))
+      ? localStorage.getItem(RESOURCE_TAB_KEY)
+      : 'service';
+  } catch {
+    return 'service';
+  }
+}
+
 let theme = loadTheme();
 let sidebarCollapsed = loadSidebarCollapsed();
+let activeResourceTab = loadResourceTab();
 let accountMenuOpen = false;
 document.documentElement.dataset.theme = theme;
 
@@ -871,6 +883,33 @@ function renderBreakdownRows(kind) {
   return `<div class="breakdown-total"><span>${formatScore(totalPoints)} estimated points</span><span>${estimableStories.filter((story) => story.manual !== null).length}/${estimableStories.length} stories scored</span></div><div class="breakdown-list">${rows.map((row) => `<div class="breakdown-row"><div class="breakdown-row-top"><strong>${escapeHTML(row.name)}</strong><span>${formatScore(row.points)} pts · ${Math.round(row.percent)}%</span></div><div class="breakdown-bar"><span style="width: ${Math.min(100, row.points / maximum * 100)}%"></span></div><div class="breakdown-row-foot">${row.storyCount} ${row.storyCount === 1 ? 'story' : 'stories'}</div></div>`).join('')}</div>`;
 }
 
+function renderEpicBreakdown() {
+  const epics = state.stories.filter((story) => story.type === 'Epic');
+  const estimableStories = state.stories.filter((story) => story.type !== 'Epic');
+  const estimatedStories = estimableStories.filter((story) => story.manual !== null);
+
+  if (!epics.length) {
+    return `<div class="epic-resource-empty"><span class="empty-state-icon">${icon('layers')}</span><h3>No epics yet</h3><p>Create an Epic from the story queue to see its linked stories, estimate roll-up, and delivery details here.</p><button class="primary-button compact-button" type="button" data-new-epic>${icon('plus')}Add epic</button></div>`;
+  }
+
+  const epicCards = epics.map((epic) => {
+    const metrics = getEpicMetrics(epic);
+    const serviceLinks = getStoryServiceLinks(epic);
+    const services = serviceLinks.length
+      ? serviceLinks.map((link) => `${getService(link.serviceId)?.name || 'Missing service'} · ${formatScore(link.allocation)}%`).join(', ')
+      : 'Unassigned';
+    const storyRows = metrics.children.length
+      ? metrics.children.map((story) => `<div class="epic-resource-story"><div><strong>${escapeHTML(story.title)}</strong><span>${escapeHTML(story.type)} · ${story.manual === null ? 'Needs estimate' : `${formatScore(story.manual)} team points`}</span></div><span class="epic-resource-story-score">${story.ai === null ? '—' : `${formatScore(story.ai)} AI`}</span></div>`).join('')
+      : '<p class="empty-manager">No stories are linked to this epic yet.</p>';
+    const acceptance = (epic.acceptance || []).map((item) => `<li>${escapeHTML(item)}</li>`).join('');
+    const sourceLink = epic.url ? `<a class="text-link" href="${escapeHTML(epic.url)}" target="_blank" rel="noreferrer">Open source ${icon('externalLink')}</a>` : '';
+
+    return `<article class="epic-resource-card"><div class="epic-resource-heading"><div><p class="section-kicker">Epic</p><h3>${escapeHTML(epic.title)}</h3><p>${escapeHTML(epic.description || 'No description added yet.')}</p></div><div class="epic-resource-actions"><span class="epic-resource-progress">${metrics.progress}% complete</span><button class="outline-button compact-button" type="button" data-edit-story="${escapeHTML(epic.id)}">${icon('edit')}Edit</button></div></div><div class="epic-resource-metrics"><div><span>Stories</span><strong>${metrics.children.length}</strong><small>${metrics.manualStories.length} estimated</small></div><div><span>Team points</span><strong>${formatScore(metrics.manualPoints)}</strong><small>saved estimates</small></div><div><span>AI points</span><strong>${formatScore(metrics.aiPoints)}</strong><small>${metrics.aiStories.length} with AI</small></div><div><span>Services</span><strong>${escapeHTML(services)}</strong><small>inherited by linked stories</small></div></div><div class="epic-resource-progress-bar"><span style="width: ${metrics.progress}%"></span></div><div class="epic-resource-details"><div><strong>Linked stories</strong><div class="epic-resource-story-list">${storyRows}</div></div><div class="epic-resource-criteria"><strong>Acceptance criteria</strong>${acceptance ? `<ul>${acceptance}</ul>` : '<p class="empty-manager">No acceptance criteria added.</p>'}${sourceLink}</div></div></article>`;
+  }).join('');
+
+  return `<div class="epic-resource-summary"><div><strong>${epics.length} ${epics.length === 1 ? 'epic' : 'epics'}</strong><span>${estimatedStories.length}/${estimableStories.length} stories estimated across the room</span></div><span>${formatScore(estimatedStories.reduce((total, story) => total + story.manual, 0))} total team points</span></div><div class="epic-resource-list">${epicCards}</div>`;
+}
+
 function renderVoteField(type, vote) {
   const isAI = type === 'ai';
   const disabled = isAI && state.roomSettings.aiEnabled !== true;
@@ -969,7 +1008,9 @@ function renderVotePanel(story) {
 }
 
 function renderAllocationCard() {
-  return `<section class="card allocation-card" id="allocation-card"><div class="lower-card-heading"><div><h2>Resource allocation</h2><p>Manual story points mapped to the services doing the work.</p></div><button class="outline-button" type="button" data-manage-services>${icon('layers')}Manage services</button></div><div class="allocation-tabs" role="tablist" aria-label="Allocation breakdown"><button class="allocation-tab active" type="button" data-breakdown="service" role="tab" aria-selected="true">By service</button><button class="allocation-tab" type="button" data-breakdown="domain" role="tab" aria-selected="false">By domain</button></div><div class="allocation-breakdown" data-breakdown-panel="service">${renderBreakdownRows('service')}</div><div class="allocation-breakdown" data-breakdown-panel="domain" hidden>${renderBreakdownRows('domain')}</div><p class="allocation-note">Only saved manual estimates count. Unestimated work is excluded until it has a team value; incomplete service links leave the remainder Unassigned.</p></section>`;
+  const tabLabels = { service: 'By service', domain: 'By domain', epic: 'EPIC' };
+  const tabs = Object.entries(tabLabels).map(([tab, label]) => `<button class="allocation-tab ${activeResourceTab === tab ? 'active' : ''}" type="button" data-breakdown="${tab}" role="tab" aria-selected="${activeResourceTab === tab}">${label}</button>`).join('');
+  return `<section class="card allocation-card" id="allocation-card"><div class="lower-card-heading"><div><h2>Resource allocation</h2><p>See how saved story estimates roll up across services, domains, and epics.</p></div><button class="outline-button" type="button" data-manage-services>${icon('layers')}Manage services</button></div><div class="allocation-tabs" role="tablist" aria-label="Resource breakdown">${tabs}</div><div class="allocation-breakdown" data-breakdown-panel="service" ${activeResourceTab === 'service' ? '' : 'hidden'}>${renderBreakdownRows('service')}</div><div class="allocation-breakdown" data-breakdown-panel="domain" ${activeResourceTab === 'domain' ? '' : 'hidden'}>${renderBreakdownRows('domain')}</div><div class="allocation-breakdown" data-breakdown-panel="epic" ${activeResourceTab === 'epic' ? '' : 'hidden'}>${renderEpicBreakdown()}</div><p class="allocation-note">Only saved manual estimates count. Unestimated work is excluded until it has a team value; incomplete service links leave the remainder Unassigned.</p></section>`;
 }
 
 function renderRoomSelector() {
@@ -1133,10 +1174,10 @@ function renderManagementPage() {
     ? renderRoomsPage()
     : activeView === 'capacity'
       ? renderCapacityPage()
-    : activeView === 'team'
+      : activeView === 'team'
       ? renderTeamPage()
       : activeView === 'resources'
-        ? `<section class="page-intro"><div><p class="eyebrow">Workspace · resources</p><h1>See where the work lands.</h1><p class="page-intro-copy">Use the same saved story estimates to understand service and domain allocation.</p></div></section>${renderAllocationCard()}`
+        ? `<section class="page-intro"><div><p class="eyebrow">Workspace · resources</p><h1>See where the work lands.</h1><p class="page-intro-copy">Use the same saved story estimates to understand service, domain, and epic allocation.</p></div></section>${renderAllocationCard()}`
         : activeView === 'admin' && isAdmin()
           ? renderAdminPage()
           : renderSettingsPage();
@@ -1755,6 +1796,7 @@ function bindEvents() {
     render();
   });
   document.querySelectorAll('[data-manage-services]').forEach((button) => button.addEventListener('click', openServicesModal));
+  document.querySelector('[data-new-epic]')?.addEventListener('click', openNewEpicModal);
 
   document.querySelectorAll('[data-vote-mode]').forEach((button) => {
     button.addEventListener('click', () => setVoteMode(button.dataset.voteMode));
@@ -2599,6 +2641,13 @@ function removeManagedService(serviceId) {
 }
 
 function setBreakdown(kind) {
+  if (!['service', 'domain', 'epic'].includes(kind)) return;
+  activeResourceTab = kind;
+  try {
+    localStorage.setItem(RESOURCE_TAB_KEY, kind);
+  } catch {
+    // Keep the selected resource tab for this page when storage is unavailable.
+  }
   document.querySelectorAll('[data-breakdown]').forEach((button) => {
     const active = button.dataset.breakdown === kind;
     button.classList.toggle('active', active);
@@ -3560,6 +3609,12 @@ function saveAndNext() {
 
 function openNewStoryModal() {
   openStoryEditorModal();
+}
+
+function openNewEpicModal() {
+  openStoryEditorModal();
+  storyEditorDraft.type = 'Epic';
+  renderStoryEditorModal();
 }
 
 function openStoryEditorModal(storyId = null) {
