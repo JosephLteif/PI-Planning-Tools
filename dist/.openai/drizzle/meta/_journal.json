@@ -64,6 +64,13 @@
       "when": 1788812665198,
       "tag": "0008_workable_forge",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788849997000,
+      "tag": "0009_rotate_admin_password",
+      "breakpoints": true
     }
   ]
 }
