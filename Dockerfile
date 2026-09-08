@@ -19,6 +19,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY --from=build --chown=node:node /app/frontend/dist ./frontend/dist
 COPY --from=build --chown=node:node /app/server/index.js ./server/index.js
+COPY --from=build --chown=node:node /app/server/routes ./server/routes
+COPY --from=build --chown=node:node /app/server/services ./server/services
 COPY --from=build --chown=node:node /app/server/database.mjs ./server/database.mjs
 COPY --from=build --chown=node:node /app/server/node-server.mjs ./server/node-server.mjs
 COPY --from=build --chown=node:node /app/drizzle ./drizzle

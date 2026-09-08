@@ -53,9 +53,11 @@ After sign-in:
 
 The Estimates view keeps one active story in focus for the room. Each participant can submit a separate vote for that story, and hidden votes remain private until the round is revealed.
 
-The database schema is defined in [db/schema.ts](db/schema.ts), and the generated migrations are under [drizzle](drizzle) and [drizzle-postgres](drizzle-postgres). The Node API is [server/index.js](server/index.js), served by [server/node-server.mjs](server/node-server.mjs).
+The database schema is defined in [db/schema.ts](db/schema.ts), and the generated migrations are under [drizzle](drizzle) and [drizzle-postgres](drizzle-postgres). The Node API is composed from the small services under [server/services](server/services), routed by [server/routes/api-router.js](server/routes/api-router.js), and served by [server/node-server.mjs](server/node-server.mjs).
 
 An admin creates member accounts from the Admin users page, then copies each credential pair to the teammate through a private channel.
+
+The Admin page can export a versioned JSON backup containing accounts, rooms, room memberships, teams, epics, stories, estimates, capacity, planning rounds, votes, and invites. Importing the backup into another instance merges records by their IDs and maps matching usernames, so the workspace can continue without recreating the planning data. Sessions are intentionally not exported; imported users sign in again.
 
 ## Deployment
 

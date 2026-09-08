@@ -89,6 +89,29 @@ export async function listAdminUsers(roomId: string): Promise<AdminUser[]> {
   return (await request<{ users: AdminUser[] }>(withRoom('/api/admin/users', roomId))).users;
 }
 
+export async function downloadBackup(): Promise<Blob> {
+  const response = await fetch('/api/admin/backup', { credentials: 'same-origin' });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new ApiError(payload?.error || 'Request failed with status ' + response.status, response.status);
+  }
+  return response.blob();
+}
+
+export async function importBackup(file: File): Promise<{ ok: true; counts: Record<string, number> }> {
+  const response = await fetch('/api/admin/backup/import', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: await file.text(),
+  });
+  const payload = await response.json().catch(() => null) as { error?: string; counts?: Record<string, number> } | null;
+  if (!response.ok) {
+    throw new ApiError(payload?.error || 'Request failed with status ' + response.status, response.status);
+  }
+  return payload as { ok: true; counts: Record<string, number> };
+}
+
 export async function listDirectoryUsers(): Promise<User[]> {
   return (await request<{ users: User[] }>('/api/directory/users')).users;
 }

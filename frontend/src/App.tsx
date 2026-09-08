@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, getSession, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, saveRoomState, setParticipation, submitVote, updateAdminUser } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, saveRoomState, setParticipation, submitVote, updateAdminUser } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
@@ -386,6 +386,40 @@ export default function App() {
     }
   }
 
+  async function handleExportBackup() {
+    setSaving(true);
+    try {
+      const blob = await downloadBackup();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'pointline-backup-' + new Date().toISOString().replaceAll(':', '-') + '.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice('Backup downloaded');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleImportBackup(file: File) {
+    setSaving(true);
+    try {
+      const result = await importBackup(file);
+      const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
+      setNotice('Backup imported (' + total + ' records). Reloading workspace…');
+      window.setTimeout(() => window.location.reload(), 600);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (sessionStatus === 'loading') return <div className="pl-loading">Opening Pointline…</div>;
   if (sessionStatus === 'signed-out' || !user) return <AuthScreen error={authError} loading={authLoading} onSubmit={handleLogin} />;
   if (loadingWorkspace || !roomPayload || !selectedRoomId) return <div className="pl-loading">Loading your planning workspace…</div>;
@@ -406,7 +440,7 @@ export default function App() {
               ? <CapacityPage room={room} state={state} user={user} saving={saving} onSave={handleSave} />
               : view === 'resources'
                 ? <ResourcesPage state={state} saving={saving} onSave={handleSave} />
-                : <AdminPage users={adminUsers} currentUserId={user.id} saving={saving} onCreate={handleCreateAdminUser} onUpdate={handleUpdateAdminUser} onDelete={handleDeleteAdminUser} />;
+                : <AdminPage users={adminUsers} currentUserId={user.id} saving={saving} onCreate={handleCreateAdminUser} onUpdate={handleUpdateAdminUser} onDelete={handleDeleteAdminUser} onExport={handleExportBackup} onImport={handleImportBackup} />;
 
   return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSignOut={handleSignOut}>{content}</AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
 }
