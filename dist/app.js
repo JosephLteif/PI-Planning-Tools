@@ -389,6 +389,7 @@ function defaultCapacityState() {
     defaults: {
       ceremoniesPct: 0.13,
       featureCapacityPct: 0.8,
+      codeReviewPct: 0,
       supportCapacityPct: 0.2,
     },
     members: [],
@@ -417,6 +418,7 @@ function normalizeCapacityState(capacity, roster = []) {
     defaults: {
       ceremoniesPct: clampCapacityPercent(sourceDefaults.ceremoniesPct, 0.13),
       featureCapacityPct: clampCapacityPercent(sourceDefaults.featureCapacityPct, 0.8),
+      codeReviewPct: clampCapacityPercent(sourceDefaults.codeReviewPct, 0),
       supportCapacityPct: clampCapacityPercent(sourceDefaults.supportCapacityPct, 0.2),
     },
     members,
@@ -425,6 +427,7 @@ function normalizeCapacityState(capacity, roster = []) {
       name: String(sprint?.name || 'Sprint').trim() || 'Sprint',
       startDate: String(sprint?.startDate || '').trim(),
       endDate: String(sprint?.endDate || '').trim(),
+      excludeFromTotal: sprint?.excludeFromTotal === true,
       holidayDaysBeirut: Math.max(0, Math.min(366, Number(sprint?.holidayDaysBeirut) || 0)),
       holidayDaysCyprus: Math.max(0, Math.min(366, Number(sprint?.holidayDaysCyprus) || 0)),
       availabilityDays: sprint?.availabilityDays && typeof sprint.availabilityDays === 'object'
@@ -457,8 +460,9 @@ function capacityForMemberSprint(member, sprint) {
     : officeDays;
   const devPct = Math.max(0, member.trainStaffDevCapacityPct - defaults.ceremoniesPct);
   const feature = devPct * availability * defaults.featureCapacityPct;
+  const codeReview = feature * defaults.codeReviewPct;
   const support = devPct * availability * defaults.supportCapacityPct;
-  return { availability, devPct, feature, support, total: feature + support };
+  return { availability, devPct, feature: feature - codeReview, codeReview, support, total: feature + support };
 }
 
 function loadState(roomId = LOCAL_DEFAULT_ROOM_ID) {
@@ -1126,25 +1130,27 @@ function renderCapacitySprint(sprint, members, canEdit) {
   const summary = members.reduce((totals, member) => {
     const result = capacityForMemberSprint(member, sprint);
     totals.feature += result.feature;
+    totals.codeReview += result.codeReview;
     totals.support += result.support;
     totals.total += result.total;
     return totals;
-  }, { feature: 0, support: 0, total: 0 });
+  }, { feature: 0, codeReview: 0, support: 0, total: 0 });
   const businessDays = businessDaysInclusive(sprint.startDate, sprint.endDate);
   const action = canEdit ? '<button class="outline-button danger-outline compact-button" type="button" data-delete-capacity-sprint="' + escapeHTML(sprint.id) + '">' + icon('trash') + 'Remove</button>' : '';
   const fields = '<div class="capacity-sprint-fields">' +
     '<label class="modal-field"><span>Name</span><input class="modal-input" data-capacity-sprint-field="name" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + escapeHTML(sprint.name) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
     '<label class="modal-field"><span>Start</span><input class="modal-input" type="date" data-capacity-sprint-field="startDate" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + escapeHTML(sprint.startDate) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
     '<label class="modal-field"><span>End</span><input class="modal-input" type="date" data-capacity-sprint-field="endDate" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + escapeHTML(sprint.endDate) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="capacity-sprint-exclude"><input type="checkbox" data-capacity-sprint-field="excludeFromTotal" data-sprint-id="' + escapeHTML(sprint.id) + '"' + (sprint.excludeFromTotal ? ' checked' : '') + (canEdit ? '' : ' disabled') + ' /> Do not count towards PI total</label>' +
     '<label class="modal-field"><span>Beirut holidays</span><input class="modal-input" type="number" min="0" max="366" data-capacity-sprint-field="holidayDaysBeirut" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + sprint.holidayDaysBeirut + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
     '<label class="modal-field"><span>Cyprus holidays</span><input class="modal-input" type="number" min="0" max="366" data-capacity-sprint-field="holidayDaysCyprus" data-sprint-id="' + escapeHTML(sprint.id) + '" value="' + sprint.holidayDaysCyprus + '"' + (canEdit ? '' : ' disabled') + ' /></label></div>';
   const rows = members.map((member) => {
     const result = capacityForMemberSprint(member, sprint);
-    return '<tr><td>' + escapeHTML(member.name) + '</td><td>' + (member.office === 'cyprus' ? 'Cyprus' : 'Beirut') + '</td><td>' + Math.round(result.devPct * 100) + '%</td><td><input class="compact-input" type="number" min="0" max="366" data-capacity-availability data-sprint-id="' + escapeHTML(sprint.id) + '" data-member-id="' + escapeHTML(member.id) + '" value="' + result.availability + '"' + (canEdit ? '' : ' disabled') + ' /></td><td>' + result.feature.toFixed(1) + '</td><td>' + result.support.toFixed(1) + '</td><td><strong>' + result.total.toFixed(1) + '</strong></td></tr>';
+    return '<tr><td>' + escapeHTML(member.name) + '</td><td>' + (member.office === 'cyprus' ? 'Cyprus' : 'Beirut') + '</td><td>' + Math.round(result.devPct * 100) + '%</td><td><input class="compact-input" type="number" min="0" max="366" data-capacity-availability data-sprint-id="' + escapeHTML(sprint.id) + '" data-member-id="' + escapeHTML(member.id) + '" value="' + result.availability + '"' + (canEdit ? '' : ' disabled') + ' /></td><td>' + result.feature.toFixed(1) + '</td><td>' + result.codeReview.toFixed(1) + '</td><td>' + result.support.toFixed(1) + '</td><td><strong>' + result.total.toFixed(1) + '</strong></td></tr>';
   }).join('');
   return '<section class="card capacity-sprint-card"><div class="section-heading"><div><p class="section-kicker">Sprint</p><h2>' + escapeHTML(sprint.name) + '</h2><p class="settings-copy">' + (sprint.startDate || 'Start date') + ' → ' + (sprint.endDate || 'End date') + ' · ' + businessDays + ' weekdays before holidays</p></div>' + action + '</div>' + fields +
-    '<div class="capacity-summary-grid"><div><span>Features</span><strong>' + summary.feature.toFixed(1) + '</strong></div><div><span>Support / CM</span><strong>' + summary.support.toFixed(1) + '</strong></div><div><span>Total capacity</span><strong>' + summary.total.toFixed(1) + '</strong></div></div>' +
-    '<div class="capacity-table-wrap"><table class="capacity-table"><thead><tr><th>Member</th><th>Office</th><th>Dev %</th><th>Availability days</th><th>Features</th><th>Support / CM</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+    '<div class="capacity-summary-grid"><div><span>Features</span><strong>' + summary.feature.toFixed(1) + '</strong></div><div><span>Code review</span><strong>' + summary.codeReview.toFixed(1) + '</strong></div><div><span>Support / CM</span><strong>' + summary.support.toFixed(1) + '</strong></div><div><span>Total capacity</span><strong>' + summary.total.toFixed(1) + '</strong></div></div>' +
+    '<div class="capacity-table-wrap"><table class="capacity-table"><thead><tr><th>Member</th><th>Office</th><th>Dev %</th><th>Availability days</th><th>Features</th><th>Code review</th><th>Support / CM</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 }
 
 function renderCapacityPage() {
@@ -1153,22 +1159,26 @@ function renderCapacityPage() {
   if (!state.capacity.members.length && members.length) state.capacity.members = structuredClone(members);
   const canEdit = canModerateRoom();
   const defaults = state.capacity.defaults;
-  const piTotals = state.capacity.sprints.reduce((totals, sprint) => {
+  const includedSprints = state.capacity.sprints.filter((sprint) => !sprint.excludeFromTotal);
+  const excludedSprintCount = state.capacity.sprints.length - includedSprints.length;
+  const piTotals = includedSprints.reduce((totals, sprint) => {
     members.forEach((member) => {
       const result = capacityForMemberSprint(member, sprint);
       totals.feature += result.feature;
+      totals.codeReview += result.codeReview;
       totals.support += result.support;
       totals.total += result.total;
     });
     return totals;
-  }, { feature: 0, support: 0, total: 0 });
+  }, { feature: 0, codeReview: 0, support: 0, total: 0 });
   const memberRows = members.map((member) => '<div class="capacity-member-row"><div><strong>' + escapeHTML(member.name) + '</strong><small>Derived dev: ' + Math.round(Math.max(0, member.trainStaffDevCapacityPct - defaults.ceremoniesPct) * 100) + '%</small></div><label><span>Office</span><select class="modal-input" data-capacity-member-office="' + escapeHTML(member.id) + '"' + (canEdit ? '' : ' disabled') + '><option value="beirut"' + (member.office === 'beirut' ? ' selected' : '') + '>Beirut</option><option value="cyprus"' + (member.office === 'cyprus' ? ' selected' : '') + '>Cyprus</option></select></label><label><span>Train/staff dev %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-member-dev="' + escapeHTML(member.id) + '" value="' + Math.round(member.trainStaffDevCapacityPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label></div>').join('');
   const sprints = state.capacity.sprints.map((sprint) => renderCapacitySprint(sprint, members, canEdit)).join('');
   return '<section class="page-intro"><div><p class="eyebrow">Workspace · capacity planning</p><h1>Plan the PI capacity.</h1><p class="page-intro-copy">Model train/staff development time across sprints, offices, features, and support work.</p></div>' + (canEdit ? '<button class="primary-button" type="button" data-add-capacity-sprint>' + icon('plus') + 'Add sprint</button>' : '') + '</section>' +
-    '<section class="card capacity-summary-card"><div class="section-heading"><div><p class="section-kicker">PI roll-up</p><h2>Planned capacity</h2></div><span class="section-count">' + state.capacity.sprints.length + ' sprints</span></div><div class="capacity-summary-grid"><div><span>Features</span><strong>' + piTotals.feature.toFixed(1) + '</strong></div><div><span>Support / CM</span><strong>' + piTotals.support.toFixed(1) + '</strong></div><div><span>Total capacity</span><strong>' + piTotals.total.toFixed(1) + '</strong></div></div></section>' +
-    '<section class="capacity-layout"><section class="card capacity-defaults-card"><div class="section-heading"><div><p class="section-kicker">Room defaults</p><h2>Capacity rules</h2></div></div><p class="settings-copy">Dev % is train/staff dev capacity minus ceremonies. Feature and support percentages split the remaining dev time.</p><div class="capacity-default-grid">' +
+    '<section class="card capacity-summary-card"><div class="section-heading"><div><p class="section-kicker">PI roll-up</p><h2>Planned capacity</h2></div><span class="section-count">' + state.capacity.sprints.length + ' sprints' + (excludedSprintCount ? ' · ' + excludedSprintCount + ' excluded' : '') + '</span></div><div class="capacity-summary-grid"><div><span>Features</span><strong>' + piTotals.feature.toFixed(1) + '</strong></div><div><span>Code review</span><strong>' + piTotals.codeReview.toFixed(1) + '</strong></div><div><span>Support / CM</span><strong>' + piTotals.support.toFixed(1) + '</strong></div><div><span>Total capacity</span><strong>' + piTotals.total.toFixed(1) + '</strong></div></div></section>' +
+    '<section class="capacity-layout"><section class="card capacity-defaults-card"><div class="section-heading"><div><p class="section-kicker">Room defaults</p><h2>Capacity rules</h2></div></div><p class="settings-copy">Dev % is train/staff dev capacity minus ceremonies. Feature and support percentages split the remaining dev time, then code review takes its share from feature capacity.</p><div class="capacity-default-grid">' +
     '<label class="modal-field"><span>Ceremonies %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="ceremoniesPct" value="' + Math.round(defaults.ceremoniesPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
     '<label class="modal-field"><span>Features capacity %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="featureCapacityPct" value="' + Math.round(defaults.featureCapacityPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
+    '<label class="modal-field"><span>Code review % of features</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="codeReviewPct" value="' + Math.round(defaults.codeReviewPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label>' +
     '<label class="modal-field"><span>Support / CM capacity %</span><input class="modal-input" type="number" min="0" max="100" step="1" data-capacity-default="supportCapacityPct" value="' + Math.round(defaults.supportCapacityPct * 100) + '"' + (canEdit ? '' : ' disabled') + ' /></label></div></section>' +
     '<section class="card capacity-members-card"><div class="section-heading"><div><p class="section-kicker">Team assumptions</p><h2>Members and offices</h2></div><span class="section-count">' + members.length + '</span></div><p class="settings-copy">Assign each member to Beirut or Cyprus and set their train/staff dev capacity. The derived Dev % is used for every sprint.</p><div class="capacity-member-list">' + (memberRows || '<p class="empty-manager">No room members are available yet.</p>') + '</div></section></section>' +
     (sprints || '<section class="card empty-state capacity-empty-state"><span class="empty-state-icon">+</span><h3>Add the first sprint</h3><p>Set sprint dates and holidays to see office-aware capacity totals.</p></section>');
@@ -1568,14 +1578,30 @@ function addImportedStories(stories) {
   showToast(`${imported.length} ${imported.length === 1 ? 'story' : 'stories'} added to the queue`);
 }
 
+function endOfNextWorkWeek(startDate) {
+  const date = new Date(startDate + 'T00:00:00Z');
+  if (!startDate || !Number.isFinite(date.getTime())) return '';
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday + 11);
+  return date.toISOString().slice(0, 10);
+}
+
 function openCapacitySprintModal() {
   if (!canModerateRoom()) return;
   const nextNumber = state.capacity.sprints.length + 1;
-  document.querySelector('#modal-root').innerHTML = '<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="capacity-sprint-title"><div class="modal-header"><div><p class="section-kicker">Capacity plan</p><h2 id="capacity-sprint-title">Add a sprint</h2><p>Weekdays are calculated from the dates. Enter office holiday counts manually.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">' + icon('x') + '</button></div><form class="modal-form" data-capacity-sprint-form><label class="modal-field"><span>Sprint name</span><input class="modal-input" name="name" required value="Sprint ' + nextNumber + '" /></label><label class="modal-field"><span>Start date</span><input class="modal-input" type="date" name="startDate" required /></label><label class="modal-field"><span>End date</span><input class="modal-input" type="date" name="endDate" required /></label><div class="capacity-default-grid"><label class="modal-field"><span>Beirut holidays</span><input class="modal-input" type="number" min="0" max="366" name="holidayDaysBeirut" value="0" /></label><label class="modal-field"><span>Cyprus holidays</span><input class="modal-input" type="number" min="0" max="366" name="holidayDaysCyprus" value="0" /></label></div><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Add sprint ' + icon('plus') + '</button></div></form></section></div>';
+  document.querySelector('#modal-root').innerHTML = '<div class="modal-backdrop" data-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="capacity-sprint-title"><div class="modal-header"><div><p class="section-kicker">Capacity plan</p><h2 id="capacity-sprint-title">Add a sprint</h2><p>Weekdays are calculated from the dates. Enter office holiday counts manually.</p></div><button class="icon-button" type="button" data-close-modal aria-label="Close">' + icon('x') + '</button></div><form class="modal-form" data-capacity-sprint-form><label class="modal-field"><span>Sprint name</span><input class="modal-input" name="name" required value="Sprint ' + nextNumber + '" /></label><label class="modal-field"><span>Start date</span><input class="modal-input" type="date" name="startDate" required /></label><label class="modal-field"><span>End date <small>Auto-fills to next week&apos;s Friday; edit to override.</small></span><input class="modal-input" type="date" name="endDate" required /></label><div class="capacity-default-grid"><label class="modal-field"><span>Beirut holidays</span><input class="modal-input" type="number" min="0" max="366" name="holidayDaysBeirut" value="0" /></label><label class="modal-field"><span>Cyprus holidays</span><input class="modal-input" type="number" min="0" max="366" name="holidayDaysCyprus" value="0" /></label></div><label class="room-setting-checkbox"><input type="checkbox" name="excludeFromTotal" /> Do not count towards PI total</label><div class="modal-footer"><button class="outline-button" type="button" data-close-modal>Cancel</button><button class="primary-button" type="submit">Add sprint ' + icon('plus') + '</button></div></form></section></div>';
   document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closeModal));
   document.querySelector('[data-modal-backdrop]').addEventListener('click', (event) => {
     if (event.target === event.currentTarget) closeModal();
   });
+  const startDateInput = document.querySelector('[name="startDate"]');
+  const endDateInput = document.querySelector('[name="endDate"]');
+  startDateInput.addEventListener('change', () => {
+    if (endDateInput.dataset.overridden !== 'true') endDateInput.value = endOfNextWorkWeek(startDateInput.value);
+  });
+  ['input', 'change'].forEach((eventName) => endDateInput.addEventListener(eventName, () => {
+    endDateInput.dataset.overridden = 'true';
+  }));
   document.querySelector('[data-capacity-sprint-form]').addEventListener('submit', (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1584,6 +1610,7 @@ function openCapacitySprintModal() {
       name: String(form.get('name') || 'Sprint').trim() || 'Sprint',
       startDate: String(form.get('startDate') || ''),
       endDate: String(form.get('endDate') || ''),
+      excludeFromTotal: form.get('excludeFromTotal') === 'on',
       holidayDaysBeirut: Math.max(0, Number(form.get('holidayDaysBeirut')) || 0),
       holidayDaysCyprus: Math.max(0, Number(form.get('holidayDaysCyprus')) || 0),
       availabilityDays: {},
@@ -1657,9 +1684,11 @@ function bindEvents() {
     if (!canModerateRoom()) return;
     const sprint = state.capacity.sprints.find((candidate) => candidate.id === input.dataset.sprintId);
     if (!sprint) return;
-    sprint[input.dataset.capacitySprintField] = ['holidayDaysBeirut', 'holidayDaysCyprus'].includes(input.dataset.capacitySprintField)
-      ? Math.max(0, Math.min(366, Number(input.value) || 0))
-      : input.value;
+    sprint[input.dataset.capacitySprintField] = input.dataset.capacitySprintField === 'excludeFromTotal'
+      ? input.checked
+      : ['holidayDaysBeirut', 'holidayDaysCyprus'].includes(input.dataset.capacitySprintField)
+        ? Math.max(0, Math.min(366, Number(input.value) || 0))
+        : input.value;
     saveState();
     render();
   }));

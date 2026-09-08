@@ -3537,6 +3537,14 @@ h1 {
   gap: 7px;
 }
 
+.modal-field > span small {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .modal-field label {
   color: var(--ink);
   font-size: 11px;
@@ -4186,14 +4194,28 @@ h1 {
 }
 
 .capacity-sprint-fields {
-  grid-template-columns: 1.4fr repeat(4, minmax(100px, 1fr));
+  grid-template-columns: 1.4fr repeat(5, minmax(100px, 1fr));
   gap: 16px;
   margin-top: 22px;
 }
 
+.capacity-sprint-exclude {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.capacity-sprint-exclude input {
+  accent-color: var(--blue);
+}
+
 .capacity-summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin: 22px 0 24px;
 }
@@ -4284,6 +4306,10 @@ h1 {
   }
 
   .capacity-sprint-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .capacity-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

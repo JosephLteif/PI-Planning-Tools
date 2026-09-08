@@ -208,6 +208,7 @@ function normalizeCapacity(source, roster = []) {
     defaults: {
       ceremoniesPct: percent(defaults.ceremoniesPct, 0.13),
       featureCapacityPct: percent(defaults.featureCapacityPct, 0.8),
+      codeReviewPct: percent(defaults.codeReviewPct, 0),
       supportCapacityPct: percent(defaults.supportCapacityPct, 0.2),
     },
     members,
@@ -216,6 +217,7 @@ function normalizeCapacity(source, roster = []) {
       name: cleanText(sprint?.name, 'Sprint', 120),
       startDate: cleanText(sprint?.startDate, '', 20),
       endDate: cleanText(sprint?.endDate, '', 20),
+      excludeFromTotal: sprint?.excludeFromTotal === true,
       holidayDaysBeirut: Math.max(0, Math.min(366, Number(sprint?.holidayDaysBeirut) || 0)),
       holidayDaysCyprus: Math.max(0, Math.min(366, Number(sprint?.holidayDaysCyprus) || 0)),
       availabilityDays: sprint?.availabilityDays && typeof sprint.availabilityDays === 'object'
