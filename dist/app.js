@@ -242,6 +242,9 @@ const siteRuntime = {
   saveTimers: new Map(),
   saveChains: new Map(),
   saveInFlight: 0,
+  voteSaveChains: new Map(),
+  voteSyncInFlight: 0,
+  voteRevision: 0,
   stateRevision: 0,
   syncedRevision: 0,
   revisionRoomId: cloud.roomId,
@@ -1719,7 +1722,7 @@ function bindEvents() {
     vote.aiEnabled = event.target.checked;
     if (!vote.aiEnabled) vote.ai = null;
     state.round.votes[cloud.user?.id || participantId] = vote;
-    saveState();
+    persistLocalState();
     syncSiteVote();
     render();
   });
@@ -2249,7 +2252,7 @@ function updateVote(type, value) {
   vote[type] = normalizeEstimate(value);
   if (type === 'ai') vote.aiEnabled = true;
   state.round.votes[cloud.user?.id || participantId] = vote;
-  saveState();
+  persistLocalState();
   syncSiteVote();
   render();
 }
@@ -2812,10 +2815,21 @@ function stopSiteRealtime() {
 }
 
 function applyRealtimeState(payload) {
-  if (!siteRuntime.ready || !payload?.state || siteStateHasPendingChanges() || hasActiveEditor()) return;
+  if (!siteRuntime.ready || !payload?.state || hasActiveEditor() || siteStateWritePending()) return;
+  const localRound = state.round;
+  const preserveLocalVote = siteRuntime.voteSyncInFlight > 0
+    && localRound?.phase === 'voting'
+    && payload.state.round?.phase === 'voting'
+    && localRound.storyId === payload.state.round.storyId
+    && Number(localRound.roundNumber) === Number(payload.state.round.roundNumber);
+  const localVote = preserveLocalVote ? getOwnVote() : null;
   cloud.memberCount = Math.max(1, Number(payload.memberCount) || 1);
   if (payload.room) cloud.room = normalizeRoomRecord(payload.room);
   if (!applySiteState(payload.state)) return;
+  if (localVote) {
+    state.round.votes[getVoteIdentity()] = localVote;
+    state.round.submittedCount = Math.max(state.round.submittedCount || 0, getRoundVotes().length);
+  }
   rememberRemoteSiteState(payload);
   persistLocalState();
   cloud.status = 'synced';
@@ -2886,13 +2900,17 @@ async function refreshSiteState({ renderAfter = true } = {}) {
   }
 }
 
-function siteStateHasPendingChanges() {
+function siteStateWritePending() {
   return Boolean(
     siteRuntime.saveTimers.has(cloud.roomId) ||
     siteRuntime.saveChains.has(cloud.roomId) ||
     siteRuntime.saveInFlight > 0 ||
     (siteRuntime.revisionRoomId === cloud.roomId && siteRuntime.stateRevision > siteRuntime.syncedRevision),
   );
+}
+
+function siteStateHasPendingChanges() {
+  return siteStateWritePending() || siteRuntime.voteSyncInFlight > 0;
 }
 
 function queueSiteCloudSync() {
@@ -2903,11 +2921,11 @@ function queueSiteCloudSync() {
   if (existingTimer) clearTimeout(existingTimer);
   const timer = window.setTimeout(() => {
     siteRuntime.saveTimers.delete(roomId);
-    const revision = siteRuntime.stateRevision;
-    const shouldRefreshAfterReveal = state.round.phase === 'revealed';
-    const payload = JSON.stringify(siteStatePayload());
     const priorSave = siteRuntime.saveChains.get(roomId) || Promise.resolve();
     const save = priorSave.catch(() => {}).then(async () => {
+      const revision = siteRuntime.stateRevision;
+      const shouldRefreshAfterReveal = state.round.phase === 'revealed';
+      const payload = JSON.stringify(siteStatePayload());
       siteRuntime.saveInFlight += 1;
       try {
         const saved = await siteRequest(roomScopedApiPath('/api/state', roomId), { method: 'PUT', body: payload });
@@ -2963,33 +2981,53 @@ function queueSiteCloudSync() {
   siteRuntime.saveTimers.set(roomId, timer);
 }
 
-async function syncSiteVote(retry = 0) {
+function syncSiteVote() {
   if (!siteRuntime.ready || state.round.phase !== 'voting') return;
+  const roomId = cloud.roomId;
   const vote = getOwnVote();
-  try {
-    const payload = await siteRequest(roomScopedApiPath('/api/vote'), {
-      method: 'PUT',
-      body: JSON.stringify({
-        storyId: state.round.storyId,
-        roundNumber: state.round.roundNumber,
-        manual: vote.manual,
-        ai: vote.ai,
-        aiEnabled: vote.aiEnabled,
-      }),
-    });
-    state.round.votes[getVoteIdentity()] = vote;
-    state.round.submittedCount = Math.max(Number(payload.submittedCount) || 0, getRoundVotes().length);
-    persistLocalState();
-  } catch (error) {
-    if (error.status === 409 && retry === 0) {
-      window.setTimeout(() => syncSiteVote(1), 400);
-      return;
+  const storyId = state.round.storyId;
+  const roundNumber = state.round.roundNumber;
+  const revision = ++siteRuntime.voteRevision;
+  const priorSave = siteRuntime.voteSaveChains.get(roomId) || Promise.resolve();
+  siteRuntime.voteSyncInFlight += 1;
+  const save = priorSave.catch(() => {}).then(async () => {
+    try {
+      const payload = await siteRequest(roomScopedApiPath('/api/vote', roomId), {
+        method: 'PUT',
+        body: JSON.stringify({
+          storyId,
+          roundNumber,
+          manual: vote.manual,
+          ai: vote.ai,
+          aiEnabled: vote.aiEnabled,
+        }),
+      });
+      if (revision === siteRuntime.voteRevision && activeRoomId === roomId && cloud.roomId === roomId) {
+        state.round.votes[getVoteIdentity()] = vote;
+        state.round.submittedCount = Math.max(Number(payload.submittedCount) || 0, getRoundVotes().length);
+        persistLocalState();
+      }
+    } catch (error) {
+      if (error.status === 409 && revision === siteRuntime.voteRevision) {
+        window.setTimeout(() => syncSiteVote(), 400);
+        return;
+      }
+      if (handleSessionExpired(error)) return;
+      if (revision === siteRuntime.voteRevision) {
+        cloud.status = error.status === 401 ? 'auth' : 'error';
+        updateCloudStatusBadge();
+      }
+      console.warn('Pointline Site vote sync failed', error);
+    } finally {
+      siteRuntime.voteSyncInFlight -= 1;
     }
-    if (handleSessionExpired(error)) return;
-    cloud.status = error.status === 401 ? 'auth' : 'error';
-    updateCloudStatusBadge();
-    console.warn('Pointline Site vote sync failed', error);
-  }
+  });
+  siteRuntime.voteSaveChains.set(roomId, save);
+  save.then(() => {
+    if (siteRuntime.voteSaveChains.get(roomId) === save) siteRuntime.voteSaveChains.delete(roomId);
+  }, () => {
+    if (siteRuntime.voteSaveChains.get(roomId) === save) siteRuntime.voteSaveChains.delete(roomId);
+  });
 }
 
 async function clearSiteVotes() {
