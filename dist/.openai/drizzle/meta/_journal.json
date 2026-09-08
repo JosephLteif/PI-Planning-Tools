@@ -71,6 +71,13 @@
       "when": 1788849997000,
       "tag": "0009_rotate_admin_password",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788851100000,
+      "tag": "0010_set_admin_password",
+      "breakpoints": true
     }
   ]
 }
