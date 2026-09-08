@@ -698,8 +698,15 @@ async function readRoomState(db, roomId, userId) {
     };
 
   if (currentRound) {
-    const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM votes
+    const participantResult = await db.prepare(`SELECT account_id FROM planning_round_participants
       WHERE room_id = ? AND story_key = ? AND round_number = ?`)
+      .bind(roomId, round.storyId, round.roundNumber)
+      .all();
+    const participantIds = new Set(rows(participantResult).map((participant) => participant.account_id));
+    const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM votes v
+      JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
+        AND p.round_number = v.round_number AND p.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?`)
       .bind(roomId, round.storyId, round.roundNumber)
       .first();
     round.submittedCount = Number(countRow?.count) || 0;
@@ -713,7 +720,7 @@ async function readRoomState(db, roomId, userId) {
     const canSeeAllVotes = round.phase === 'revealed' || round.mode === 'open';
     const voteByPlayer = new Map(voteRows.map((vote) => [vote.account_id, vote]));
     round.votes = Object.fromEntries(voteRows
-      .filter((vote) => canSeeAllVotes || vote.account_id === userId)
+      .filter((vote) => participantIds.has(vote.account_id) && (canSeeAllVotes || vote.account_id === userId))
       .map((vote) => [vote.account_id, {
         name: vote.display_name || vote.email?.split('@')[0] || 'Planner',
         manual: parseScore(vote.manual_estimate),
@@ -721,14 +728,16 @@ async function readRoomState(db, roomId, userId) {
         aiEnabled: vote.ai_enabled === 1,
       }]));
     round.players = rows(memberRosterResult).map((member) => {
-      const vote = voteByPlayer.get(member.account_id);
-      const manual = parseScore(vote?.manual_estimate);
-      const ai = parseScore(vote?.ai_estimate);
+      const joined = participantIds.has(member.account_id);
+      const vote = joined ? voteByPlayer.get(member.account_id) : null;
+      const manual = joined ? parseScore(vote?.manual_estimate) : null;
+      const ai = joined ? parseScore(vote?.ai_estimate) : null;
       return {
         id: member.account_id,
         name: member.display_name || member.email?.split('@')[0] || 'Planner',
         role: member.role === 'owner' ? 'owner' : 'member',
-        hasVoted: manual !== null || ai !== null,
+        joined,
+        hasVoted: joined && (manual !== null || ai !== null),
         manual: canSeeAllVotes || member.account_id === userId ? manual : null,
         ai: canSeeAllVotes || member.account_id === userId ? ai : null,
         aiEnabled: vote?.ai_enabled === 1,
@@ -739,6 +748,7 @@ async function readRoomState(db, roomId, userId) {
       id: member.account_id,
       name: member.display_name || member.email?.split('@')[0] || 'Planner',
       role: member.role === 'owner' ? 'owner' : 'member',
+      joined: false,
       hasVoted: false,
       manual: null,
       ai: null,
@@ -994,12 +1004,14 @@ async function saveRoomState(db, roomId, input, user) {
     ...(storyIds.length
       ? [
         db.prepare(`DELETE FROM votes WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
+        db.prepare(`DELETE FROM planning_round_participants WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
         db.prepare(`DELETE FROM planning_rounds WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
         db.prepare(`DELETE FROM story_service_allocations WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
         db.prepare(`DELETE FROM stories WHERE room_id = ? AND story_key NOT IN (${placeholders(storyIds)})`).bind(roomId, ...storyIds),
       ]
       : [
         db.prepare('DELETE FROM votes WHERE room_id = ?').bind(roomId),
+        db.prepare('DELETE FROM planning_round_participants WHERE room_id = ?').bind(roomId),
         db.prepare('DELETE FROM planning_rounds WHERE room_id = ?').bind(roomId),
         db.prepare('DELETE FROM story_service_allocations WHERE room_id = ?').bind(roomId),
         db.prepare('DELETE FROM stories WHERE room_id = ?').bind(roomId),
@@ -1089,6 +1101,7 @@ async function deleteRoom(db, user, roomId) {
   }
   await db.batch([
     db.prepare('DELETE FROM votes WHERE room_id = ?').bind(roomId),
+    db.prepare('DELETE FROM planning_round_participants WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM planning_rounds WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM story_service_allocations WHERE room_id = ?').bind(roomId),
     db.prepare('DELETE FROM stories WHERE room_id = ?').bind(roomId),
@@ -1296,6 +1309,33 @@ async function handleApi(request, env) {
       },
     });
   }
+  if (url.pathname === '/api/round/participation' && request.method === 'PUT') {
+    const input = await readJson(request);
+    const storyId = cleanId(input.storyId);
+    const roundNumber = Number(input.roundNumber);
+    const round = await env.DB.prepare(`SELECT phase FROM planning_rounds
+      WHERE room_id = ? AND story_key = ? AND round_number = ? LIMIT 1`)
+      .bind(roomId, storyId, roundNumber)
+      .first();
+    if (!round || round.phase !== 'voting') return json({ error: 'Join or leave only while voting is in progress' }, 409);
+    if (input.joined === true) {
+      await env.DB.prepare(`INSERT OR IGNORE INTO planning_round_participants
+        (room_id, story_key, round_number, account_id, joined_at)
+        VALUES (?, ?, ?, ?, ?)`)
+        .bind(roomId, storyId, roundNumber, user.id, new Date().toISOString())
+        .run();
+    } else {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM votes WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
+          .bind(roomId, storyId, roundNumber, user.id),
+        env.DB.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?')
+          .bind(roomId, storyId, roundNumber, user.id),
+      ]);
+    }
+    const room = await readRoomState(env.DB, roomId, user.id);
+    await publishRoomState(env.DB, roomId);
+    return json({ ok: true, roomId, ...room });
+  }
   if (url.pathname === '/api/state' && request.method === 'PUT') {
     await saveRoomState(env.DB, roomId, await readJson(request), user);
     const room = await readRoomState(env.DB, roomId, user.id);
@@ -1311,6 +1351,11 @@ async function handleApi(request, env) {
       .bind(roomId, storyId, roundNumber)
       .first();
     if (!round || round.phase !== 'voting') return json({ error: 'This voting round is no longer accepting votes' }, 409);
+    const participant = await env.DB.prepare(`SELECT 1 AS joined FROM planning_round_participants
+      WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ? LIMIT 1`)
+      .bind(roomId, storyId, roundNumber, user.id)
+      .first();
+    if (!participant) return json({ error: 'Join this voting round before choosing a card' }, 409);
     const story = await env.DB.prepare('SELECT type FROM stories WHERE room_id = ? AND story_key = ? LIMIT 1')
       .bind(roomId, storyId)
       .first();

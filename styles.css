@@ -2111,6 +2111,34 @@ h1 {
   gap: 7px;
 }
 
+.vote-join-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.vote-join-callout div {
+  display: grid;
+  gap: 4px;
+}
+
+.vote-join-callout strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.vote-join-callout span {
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .vote-card {
   height: 320px;
   margin-top: 16px;
@@ -2158,6 +2186,10 @@ h1 {
   border-radius: 7px;
 }
 
+.vote-player-row.is-not-joined {
+  opacity: 0.62;
+}
+
 .vote-player-row.has-both-estimates {
   grid-template-columns: 27px minmax(0, 1fr) minmax(112px, auto);
 }
@@ -2196,6 +2228,10 @@ h1 {
 
 .vote-player-copy small.is-voted {
   color: var(--green);
+}
+
+.vote-player-copy small.is-not-joined {
+  color: var(--ink-soft);
 }
 
 .vote-player-value {
@@ -3447,6 +3483,11 @@ h1 {
     padding-top: 12px;
   }
 
+  .vote-join-callout {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .vote-actions {
     justify-content: flex-start;
     margin-top: 12px;
@@ -4018,6 +4059,7 @@ html[data-theme='dark'] .vote-field.vote-ai-field {
 html[data-theme='dark'] .estimate-field.ai-field.is-disabled,
 html[data-theme='dark'] .vote-panel,
 html[data-theme='dark'] .vote-field,
+html[data-theme='dark'] .vote-join-callout,
 html[data-theme='dark'] .vote-results-summary div,
 html[data-theme='dark'] .allocation-breakdown,
 html[data-theme='dark'] .empty-allocation {

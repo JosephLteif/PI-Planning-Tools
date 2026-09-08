@@ -145,6 +145,17 @@ export const planningRounds = sqliteTable('planning_rounds', {
   roundsOrderIdx: index('rounds_order_idx').on(table.roomId, table.storyKey, table.roundNumber),
 }));
 
+export const planningRoundParticipants = sqliteTable('planning_round_participants', {
+  roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
+  storyKey: text('story_key').notNull(),
+  roundNumber: integer('round_number').notNull(),
+  accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  joinedAt: text('joined_at').notNull(),
+}, (table) => ({
+  participantsPk: primaryKey({ columns: [table.roomId, table.storyKey, table.roundNumber, table.accountId] }),
+  participantsRoundIdx: index('participants_round_idx').on(table.roomId, table.storyKey, table.roundNumber),
+}));
+
 export const votes = sqliteTable('votes', {
   roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
   storyKey: text('story_key').notNull(),
