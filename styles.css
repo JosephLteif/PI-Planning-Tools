@@ -63,6 +63,36 @@ button {
   background: var(--navy);
 }
 
+.sidebar-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-collapse {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0;
+  color: #a7b2c3;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  place-items: center;
+}
+
+.sidebar-collapse:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-collapse svg {
+  width: 15px;
+  height: 15px;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -600,7 +630,7 @@ h1 {
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 338px;
+  grid-template-columns: minmax(0, 1fr) minmax(400px, 0.72fr);
   gap: 18px;
   align-items: start;
 }
@@ -1777,6 +1807,69 @@ h1 {
   padding-right: 5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-menu {
+  position: relative;
+}
+
+.profile-button > svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ink-soft);
+}
+
+.account-menu-panel {
+  display: grid;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 174px;
+  gap: 3px;
+  padding: 9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 14px 32px rgba(15, 31, 53, 0.16);
+}
+
+.account-menu-panel strong {
+  overflow: hidden;
+  padding: 3px 5px 7px;
+  color: var(--ink-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 7px;
+  color: var(--ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.account-menu-panel button:hover {
+  background: var(--blue-soft);
+}
+
+.account-menu-panel button:last-child:hover {
+  color: var(--coral);
+  background: var(--coral-soft);
+}
+
+.account-menu-panel .icon {
+  width: 14px;
+  height: 14px;
 }
 
 .story-services {
@@ -3174,7 +3267,7 @@ h1 {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1440px) {
   .main-area {
     padding-right: 26px;
     padding-left: 26px;
@@ -3206,6 +3299,65 @@ h1 {
   }
 }
 
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 70px minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+  align-items: center;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-brand-row {
+  width: 100%;
+  justify-content: center;
+  gap: 5px;
+}
+
+.app-shell.sidebar-collapsed .brand {
+  padding: 0;
+}
+
+.app-shell.sidebar-collapsed .brand-text,
+.app-shell.sidebar-collapsed .sidebar-kicker,
+.app-shell.sidebar-collapsed .room-context-label,
+.app-shell.sidebar-collapsed .room-selector-copy,
+.app-shell.sidebar-collapsed .room-selector > svg,
+.app-shell.sidebar-collapsed .room-selector-action,
+.app-shell.sidebar-collapsed .nav-link-label,
+.app-shell.sidebar-collapsed .nav-count,
+.app-shell.sidebar-collapsed .sidebar-tip,
+.app-shell.sidebar-collapsed .sidebar-user-copy {
+  display: none;
+}
+
+.app-shell.sidebar-collapsed .room-context {
+  width: 40px;
+}
+
+.app-shell.sidebar-collapsed .room-selector {
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-top: 35px;
+  padding: 0;
+}
+
+.app-shell.sidebar-collapsed .sidebar-nav {
+  width: 100%;
+  margin-top: 22px;
+}
+
+.app-shell.sidebar-collapsed .nav-link {
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.app-shell.sidebar-collapsed .sidebar-user {
+  padding: 15px 0 0;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 70px minmax(0, 1fr);
@@ -3219,6 +3371,15 @@ h1 {
 
   .brand {
     padding: 0;
+  }
+
+  .sidebar-brand-row {
+    width: 40px;
+    justify-content: center;
+  }
+
+  .sidebar-collapse {
+    display: none;
   }
 
   .brand-text,
@@ -3274,7 +3435,7 @@ h1 {
   }
 
   .story-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .modal-backdrop {
@@ -3301,7 +3462,8 @@ h1 {
 
   .room-context,
   .sidebar-user,
-  .sidebar-spacer {
+  .sidebar-spacer,
+  .sidebar-collapse {
     display: none;
   }
 

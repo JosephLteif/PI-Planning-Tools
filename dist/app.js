@@ -3,6 +3,7 @@ const PARTICIPANT_ID_KEY = 'pointline-participant-id-v1';
 const ROOM_ID_KEY = 'pointline-room-id-v1';
 const WORKSPACE_KEY = 'pointline-workspace-v1';
 const THEME_KEY = 'pointline-theme-v1';
+const SIDEBAR_COLLAPSED_KEY = 'pointline-sidebar-collapsed-v1';
 const LOCAL_DEFAULT_ROOM_ID = 'local-commerce';
 
 function loadTheme() {
@@ -13,7 +14,17 @@ function loadTheme() {
   }
 }
 
+function loadSidebarCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 let theme = loadTheme();
+let sidebarCollapsed = loadSidebarCollapsed();
+let accountMenuOpen = false;
 document.documentElement.dataset.theme = theme;
 
 const sequences = {
@@ -533,14 +544,14 @@ const lucideIconNames = {
   link: 'link', bell: 'bell', sun: 'sun', moon: 'moon', check: 'check', sparkle: 'sparkles',
   refresh: 'refresh-cw', clock: 'clock', info: 'info', note: 'file-text', upload: 'upload', x: 'x',
   lock: 'lock', eye: 'eye', flip: 'refresh-cw', layers: 'layers', cloud: 'cloud', play: 'play',
-  shield: 'shield-check', arrowRight: 'arrow-right', copy: 'copy',
+  shield: 'shield-check', arrowRight: 'arrow-right', copy: 'copy', panelLeftClose: 'panel-left-close', panelLeftOpen: 'panel-left-open', logOut: 'log-out',
 };
 
 const iconFallbacks = {
   board: '▦', users: '♟', settings: '⚙', plus: '+', chevron: '›', chevronDown: '⌄', chevronUp: '⌃',
   edit: '✎', trash: '×', share: '↗', link: '↗', bell: '•', sun: '☼', moon: '☾', check: '✓', sparkle: '✦',
   refresh: '↻', clock: '◷', info: 'i', note: '▤', upload: '↑', x: '×', lock: '⌑', eye: '◉', flip: '↻',
-  layers: '▱', cloud: '☁', play: '▶', shield: '◆', arrowRight: '→', copy: '▣',
+  layers: '▱', cloud: '☁', play: '▶', shield: '◆', arrowRight: '→', copy: '▣', panelLeftClose: '‹', panelLeftOpen: '›', logOut: '↪',
 };
 
 function icon(name, className = '') {
@@ -794,7 +805,7 @@ function getAllocationRows(kind) {
 
 function renderAuthAction() {
   if (cloud.user) {
-    return `<button class="profile-button" type="button" data-auth-action="signout" title="Sign out ${escapeHTML(getUserName())}"><span class="avatar">${escapeHTML(getInitials(getUserName()))}</span><span class="profile-name">${escapeHTML(getUserName())}</span></button>`;
+    return `<div class="account-menu"><button class="profile-button" type="button" data-account-menu aria-expanded="${accountMenuOpen}" aria-haspopup="menu"><span class="avatar">${escapeHTML(getInitials(getUserName()))}</span><span class="profile-name">${escapeHTML(getUserName())}</span>${icon('chevronDown')}</button>${accountMenuOpen ? `<div class="account-menu-panel" role="menu"><strong>${escapeHTML(getUserName())}</strong><button type="button" role="menuitem" data-switch-account>${icon('users')}Switch account</button><button type="button" role="menuitem" data-logout>${icon('logOut')}Log out</button></div>` : ''}</div>`;
   }
   return `<button class="outline-button auth-button" type="button" data-auth-action="signin">${icon('users')}Sign in</button>`;
 }
@@ -941,7 +952,7 @@ function renderRoomSelector() {
 function renderSidebar(view = activeView) {
   const roomCount = cloud.rooms.length || 1;
   return `<aside class="sidebar">
-    <div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div>
+    <div class="sidebar-brand-row"><div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div><button class="sidebar-collapse" type="button" data-sidebar-collapse aria-label="${sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}" title="${sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}">${icon(sidebarCollapsed ? 'panelLeftOpen' : 'panelLeftClose')}</button></div>
     <p class="sidebar-kicker">Planning workspace</p>
     ${renderRoomSelector()}
 
@@ -1114,7 +1125,7 @@ function render() {
     bindEvents();
     return;
   }
-  app.className = 'app-shell';
+  app.className = `app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`;
   if (activeView !== 'estimates') {
     renderManagementPage();
     return;
@@ -1135,27 +1146,7 @@ function render() {
   const progress = estimableStories.length ? Math.round((estimatedCount / estimableStories.length) * 100) : 0;
 
   document.querySelector('#app').innerHTML = `
-    <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">P</span><span class="brand-text">pointline</span></div>
-      <p class="sidebar-kicker">Planning workspace</p>
-      ${renderRoomSelector()}
-
-      <nav class="sidebar-nav" aria-label="Workspace navigation">
-        <button class="nav-link active" type="button" data-nav="estimates">${icon('board')}<span class="nav-link-label">Estimates</span><span class="nav-count">${estimatedCount}/${estimableStories.length}</span></button>
-        <button class="nav-link" type="button" data-nav="team">${icon('users')}<span class="nav-link-label">Team</span><span class="nav-count">${cloud.memberCount}</span></button>
-        <button class="nav-link" type="button" data-nav="resources">${icon('layers')}<span class="nav-link-label">Resources</span><span class="nav-count">${state.services.length}</span></button>
-        <button class="nav-link" type="button" data-nav="capacity">${icon('clock')}<span class="nav-link-label">Capacity</span><span class="nav-count">${state.capacity.sprints.length}</span></button>
-        <button class="nav-link" type="button" data-nav="rooms">${icon('layers')}<span class="nav-link-label">Rooms</span><span class="nav-count">${cloud.rooms.length || 1}</span></button>
-        <button class="nav-link" type="button" data-nav="settings">${icon('settings')}<span class="nav-link-label">Room settings</span></button>
-        ${isAdmin() ? `<button class="nav-link" type="button" data-nav="admin">${icon('shield')}<span class="nav-link-label">Admin users</span><span class="nav-count">${cloud.adminUsers.length || ''}</span></button>` : ''}
-      </nav>
-
-      <div class="sidebar-spacer"></div>
-      <div class="sidebar-user">
-        <span class="avatar">${escapeHTML(getInitials(getUserName()))}</span>
-        <span class="sidebar-user-copy"><strong>${escapeHTML(getUserName())}</strong><span>${cloud.user ? 'Cloud participant' : 'Local facilitator'}</span></span>
-      </div>
-    </aside>
+    ${renderSidebar(activeView)}
 
     <main class="main-area">
       <header class="topbar">
@@ -1725,6 +1716,15 @@ function bindEvents() {
     render();
   });
   document.querySelector('[data-notifications]')?.addEventListener('click', () => showToast('You’re all caught up'));
+  document.querySelector('[data-sidebar-collapse]')?.addEventListener('click', () => {
+    sidebarCollapsed = !sidebarCollapsed;
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+    } catch {
+      // Keep the selected layout for this page when storage is unavailable.
+    }
+    render();
+  });
   document.querySelectorAll('[data-manage-services]').forEach((button) => button.addEventListener('click', openServicesModal));
 
   document.querySelectorAll('[data-vote-mode]').forEach((button) => {
@@ -1767,15 +1767,15 @@ function bindEvents() {
   document.querySelectorAll('[data-breakdown]').forEach((button) => {
     button.addEventListener('click', () => setBreakdown(button.dataset.breakdown));
   });
-  document.querySelector('[data-auth-action]')?.addEventListener('click', (event) => {
-    if (cloud.user) {
-      event.preventDefault();
-      signOut();
-    } else {
-      event.preventDefault();
-      showToast('Sign in is available on the hosted Pointline site');
-    }
+  document.querySelector('[data-account-menu]')?.addEventListener('click', () => {
+    accountMenuOpen = !accountMenuOpen;
+    render();
   });
+  document.querySelector('[data-switch-account]')?.addEventListener('click', () => {
+    signOut().then(() => document.querySelector('[name="username"]')?.focus());
+  });
+  document.querySelector('[data-logout]')?.addEventListener('click', signOut);
+  document.querySelector('[data-auth-action]')?.addEventListener('click', () => showToast('Sign in is available on the hosted Pointline site'));
 }
 
 function makeEmptyRoomState() {
@@ -2659,6 +2659,7 @@ async function signOut() {
   cloud.adminUsers = [];
   cloud.lastCreatedCredentials = null;
   cloud.authError = '';
+  accountMenuOpen = false;
   cloud.status = siteRuntime.enabled ? 'auth' : 'local';
   render();
 }
