@@ -80,7 +80,7 @@ export default function App() {
         if (!nextRoomId) throw new Error('No planning room is available for this account.');
         const [payload, nextTeams, nextAdminUsers, nextDirectoryUsers] = await Promise.all([
           loadRoom(nextRoomId),
-          listTeams(nextRoomId),
+          listTeams(),
           user.role === 'admin' ? listAdminUsers(nextRoomId) : Promise.resolve([]),
           listDirectoryUsers(),
         ]);
@@ -153,14 +153,12 @@ export default function App() {
   async function handleRoomChange(roomId: string) {
     setLoadingWorkspace(true);
     try {
-      const [payload, nextTeams, nextAdminUsers] = await Promise.all([
+      const [payload, nextAdminUsers] = await Promise.all([
         loadRoom(roomId),
-        listTeams(roomId),
         user?.role === 'admin' ? listAdminUsers(roomId) : Promise.resolve([]),
       ]);
       setSelectedRoomId(roomId);
       setRoomPayload(payload);
-      setTeams(nextTeams);
       setAdminUsers(nextAdminUsers);
       setView('estimates');
       window.history.replaceState({}, '', `?room=${encodeURIComponent(roomId)}`);
@@ -263,10 +261,9 @@ export default function App() {
   }
 
   async function handleCreateTeam(name: string) {
-    if (!selectedRoomId) return;
     setSaving(true);
     try {
-      const result = await createTeam(selectedRoomId, name);
+      const result = await createTeam(name);
       setTeams((current) => [...current, result.team]);
       setNotice(`${name} created`);
     } catch (error) {
@@ -277,7 +274,6 @@ export default function App() {
   }
 
   async function handleAddTeamMember(teamId: string, accountId: string) {
-    if (!selectedRoomId) return;
     setSaving(true);
     try {
       const result = await addTeamMember(teamId, accountId);
@@ -433,7 +429,7 @@ export default function App() {
       : view === 'rooms'
         ? <RoomsPage rooms={rooms} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
-          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onInvite={handleCreateInvite} />
+          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} />
           : view === 'settings'
             ? <SettingsPage state={state} saving={saving} onSave={handleSave} />
             : view === 'capacity'

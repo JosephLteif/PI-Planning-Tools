@@ -81,8 +81,8 @@ export async function loadRoom(roomId: string): Promise<RoomPayload> {
   return normalizeRoomPayload(await request<RoomPayload>(withRoom('/api/state', roomId)));
 }
 
-export async function listTeams(roomId: string): Promise<Team[]> {
-  return (await request<{ teams: Team[] }>(withRoom('/api/teams', roomId))).teams;
+export async function listTeams(): Promise<Team[]> {
+  return (await request<{ teams: Team[] }>('/api/teams')).teams;
 }
 
 export async function listAdminUsers(roomId: string): Promise<AdminUser[]> {
@@ -141,8 +141,8 @@ export function createRoom(roomId: string, name: string, piLabel: string, state:
   }).then(normalizeRoomPayload);
 }
 
-export function createTeam(roomId: string, name: string) {
-  return request<{ ok: true; team: Team }>(withRoom('/api/teams', roomId), {
+export function createTeam(name: string) {
+  return request<{ ok: true; team: Team }>('/api/teams', {
     method: 'POST',
     body: { name },
   });

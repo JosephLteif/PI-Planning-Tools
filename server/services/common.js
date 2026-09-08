@@ -1,6 +1,6 @@
-export const DEFAULT_ROOM_ID = 'pi-24-commerce';
-export const DEFAULT_ROOM_NAME = 'Commerce platform';
-export const DEFAULT_PI_LABEL = 'PI 24';
+export const DEFAULT_ROOM_ID = 'room-7917bb803c5d47649042a61a';
+export const DEFAULT_ROOM_NAME = 'PI71 Planning';
+export const DEFAULT_PI_LABEL = 'PI 71';
 export const ALLOWED_SEQUENCES = new Set(['sequential', 'fibonacci', 'modified']);
 export const ALLOWED_PHASES = new Set(['idle', 'voting', 'revealed']);
 export const ALLOWED_INVITE_KINDS = new Set(['room-person', 'room-team', 'team']);

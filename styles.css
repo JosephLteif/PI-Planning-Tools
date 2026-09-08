@@ -1152,7 +1152,10 @@ h1 {
 .story-queues {
   display: grid;
   gap: 10px;
+  height: 560px;
+  overflow-y: auto;
   padding: 9px;
+  align-content: start;
 }
 
 .story-queue-group {
@@ -1176,6 +1179,13 @@ h1 {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.story-queue-group-heading-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
 }
 
 .story-queue-group-heading > div > span:last-child {
@@ -1443,7 +1453,21 @@ h1 {
 .story-score {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+.story-score-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.story-score-item small {
+  color: var(--ink-soft);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .score-pill {
@@ -3400,6 +3424,18 @@ h1 {
   margin-top: 15px;
 }
 
+.import-epic-field {
+  margin-top: 15px;
+  padding: 13px;
+  background: var(--blue-soft);
+  border: 1px solid #d7e4fb;
+  border-radius: 9px;
+}
+
+.import-epic-field .modal-hint {
+  margin-bottom: 0;
+}
+
 .import-panel[hidden] {
   display: none;
 }
@@ -4781,6 +4817,48 @@ html[data-theme='dark'] .history-detail {
   align-items: start;
 }
 
+.migration-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+  padding: 24px;
+}
+
+.migration-card-copy {
+  min-width: 0;
+}
+
+.migration-card-copy h2 {
+  margin: 7px 0 7px;
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+
+.migration-card-copy p:not(.section-kicker) {
+  max-width: 760px;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.migration-card-copy small {
+  display: block;
+  margin-top: 11px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.migration-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .admin-create-card,
 .admin-users-card {
   min-width: 0;
@@ -5370,6 +5448,14 @@ html[data-theme='dark'] .history-detail {
   .admin-layout {
     grid-template-columns: 1fr;
   }
+
+  .migration-card {
+    display: grid;
+  }
+
+  .migration-card-actions {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 640px) {
@@ -5449,5 +5535,28 @@ html[data-theme='dark'] .history-detail {
 
   .invite-url-row .primary-button {
     width: 100%;
+  }
+
+  .story-queues {
+    height: 420px;
+  }
+
+  .story-score-item small {
+    font-size: 7px;
+  }
+
+  .migration-card {
+    gap: 17px;
+    padding: 19px 15px;
+  }
+
+  .migration-card-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .migration-card-actions .outline-button {
+    width: 100%;
+    justify-content: center;
   }
 }

@@ -78,13 +78,6 @@ export function AppShell({
             </button>
           ) : null}
         </nav>
-        {!collapsed ? (
-          <div className="sidebar-tip">
-            <div className="sidebar-tip-icon">✦</div>
-            <strong>Keep the room focused</strong>
-            <p>Start a round when the story is ready, then capture the team’s shared estimate.</p>
-          </div>
-        ) : null}
         <div className="sidebar-user">
           <span className="avatar">{initials(name)}</span>
           {!collapsed ? <div className="sidebar-user-copy"><strong>{name}</strong><span>{user.role === 'admin' ? 'Workspace admin' : 'Planner'}</span></div> : null}

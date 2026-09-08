@@ -32,12 +32,34 @@ type StoryQueueProps = {
 };
 
 function StoryQueue({ stories, selectedId, canManage, voting, onSelect, onNew, onImport, onEdit, onMove, onDelete, onRevote }: StoryQueueProps) {
-  const epics = stories.filter((story) => story.type === 'Epic');
-  const groupedIds = new Set(epics.flatMap((epic) => stories.filter((story) => story.epicId === epic.id).map((story) => story.id)));
-  const groups = [
-    ...epics.map((epic) => ({ key: epic.id, label: epic.title, epic, children: stories.filter((story) => story.id === epic.id || story.epicId === epic.id) })),
-    { key: 'unassigned', label: 'Unassigned stories', epic: null, children: stories.filter((story) => story.type !== 'Epic' && (!story.epicId || !groupedIds.has(story.id))) },
-  ].filter((group) => group.children.length);
+  const epics = useMemo(() => stories.filter((story) => story.type === 'Epic'), [stories]);
+  const epicGroups = useMemo(() => epics.map((epic) => ({
+    key: epic.id,
+    label: epic.title,
+    epic,
+    children: stories.filter((story) => story.type !== 'Epic' && story.epicId === epic.id),
+  })), [epics, stories]);
+  const groupedIds = new Set(epicGroups.flatMap((group) => group.children.map((story) => story.id)));
+  const unassignedStories = stories.filter((story) => story.type !== 'Epic' && (!story.epicId || !groupedIds.has(story.id)));
+  const groups = [...epicGroups, ...(unassignedStories.length ? [{ key: 'unassigned', label: 'Unassigned stories', epic: null, children: unassignedStories }] : [])];
+  const selectedStory = stories.find((story) => story.id === selectedId);
+  const selectedStoryEpicId = selectedStory?.type !== 'Epic' ? selectedStory?.epicId : null;
+  const [focusedEpicId, setFocusedEpicId] = useState(() => selectedStoryEpicId && epics.some((epic) => epic.id === selectedStoryEpicId) ? selectedStoryEpicId : epics[0]?.id || '');
+
+  useEffect(() => {
+    if (!focusedEpicId || !epics.some((epic) => epic.id === focusedEpicId)) setFocusedEpicId(selectedStoryEpicId && epics.some((epic) => epic.id === selectedStoryEpicId) ? selectedStoryEpicId : epics[0]?.id || '');
+  }, [epics, focusedEpicId, selectedStoryEpicId]);
+
+  const focusedGroup = epicGroups.find((group) => group.epic.id === focusedEpicId);
+  const focusedDone = focusedGroup?.children.filter((story) => story.manual !== null).length || 0;
+  const focusedTotal = focusedGroup?.children.length || 0;
+
+  function selectEpic(epicId: string) {
+    setFocusedEpicId(epicId);
+    const group = epicGroups.find((candidate) => candidate.epic.id === epicId);
+    const nextStory = group?.children.find((story) => story.manual === null) || group?.children[0];
+    if (nextStory) onSelect(nextStory.id);
+  }
 
   function storyRow(story: Story) {
     const index = stories.findIndex((candidate) => candidate.id === story.id);
@@ -45,15 +67,20 @@ function StoryQueue({ stories, selectedId, canManage, voting, onSelect, onNew, o
       <button className="story-row-main" type="button" onClick={() => onSelect(story.id)}>
         <span className="story-number">{story.id}</span>
         <span className="story-row-copy"><strong>{story.title}</strong><span>{story.type}{story.epicId ? ' · linked to epic' : ''}</span></span>
-        <span className="story-score"><span className={`score-pill${story.manual === null ? ' empty' : ''}`}>{story.manual ?? '—'}</span></span>
+        <span className="story-score" aria-label={`${story.title}: team ${story.manual ?? 'not estimated'}, AI ${story.ai ?? 'not estimated'}`}><span className="story-score-item"><small>Team</small><span className={`score-pill ${story.manual === null ? 'empty' : 'manual'}`}>{story.manual ?? '—'}</span></span><span className="story-score-item"><small>AI</small><span className={`score-pill ${story.ai === null ? 'empty' : 'ai'}`}>{story.ai ?? '—'}</span></span></span>
       </button>
       {canManage ? <div className="story-row-actions"><button className="story-action-button" type="button" disabled={voting} onClick={() => onEdit(story)} aria-label={`Edit ${story.title}`}>✎</button><button className="story-action-button" type="button" disabled={voting || index <= 0} onClick={() => onMove(story.id, -1)} aria-label={`Move ${story.title} up`}>↑</button><button className="story-action-button" type="button" disabled={voting || index >= stories.length - 1} onClick={() => onMove(story.id, 1)} aria-label={`Move ${story.title} down`}>↓</button>{story.manual !== null ? <button className="story-action-button" type="button" disabled={voting} onClick={() => onRevote(story)} aria-label={`Revote ${story.title}`}>↻</button> : null}<button className="story-action-button danger-action" type="button" disabled={voting || stories.length <= 1} onClick={() => onDelete(story)} aria-label={`Delete ${story.title}`}>×</button></div> : null}
     </div>;
   }
 
+  const visibleGroups = focusedEpicId ? groups.filter((group) => group.epic?.id === focusedEpicId || group.key === 'unassigned') : groups;
+  const estimableCount = stories.filter((story) => story.type !== 'Epic').length;
+  const estimatedCount = stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length;
+
   return <section className="card queue-card">
-    <div className="queue-header"><div><h2>Story queue</h2><p>{stories.length} {stories.length === 1 ? 'story' : 'stories'} · {stories.filter((story) => story.manual !== null).length} estimated</p></div>{canManage ? <div className="queue-header-actions"><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew()}>＋ Story</button><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew('Epic')}>＋ Epic</button><button className="outline-button import-button" type="button" disabled={voting} onClick={onImport}>Import</button></div> : null}</div>
-    <div className="story-queues">{groups.map((group) => group.epic ? <div className="story-queue-group" key={group.key}><div className="story-queue-group-heading"><div><span className="queue-group-icon">◆</span><span><strong>{group.label}</strong><small>Epic · {group.children.length - 1} linked {group.children.length - 1 === 1 ? 'story' : 'stories'}</small></span></div><span className="queue-group-count">{group.children.filter((story) => story.manual !== null).length}/{group.children.length}</span></div><div className="story-list">{group.children.map(storyRow)}</div></div> : <div className="story-list" key={group.key}>{group.children.map(storyRow)}</div>)}</div>
+    <div className="queue-header"><div><h2>Story queue</h2><p>{estimableCount} {estimableCount === 1 ? 'story' : 'stories'} · {estimatedCount} estimated</p></div>{canManage ? <div className="queue-header-actions"><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew()}>＋ Story</button><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew('Epic')}>＋ Epic</button><button className="outline-button import-button" type="button" disabled={voting} onClick={onImport}>Import</button></div> : null}</div>
+    {epics.length ? <div className="epic-selector"><span className={`epic-selector-mark${focusedTotal > 0 && focusedDone === focusedTotal ? ' is-complete' : ''}`} aria-hidden="true">{focusedTotal > 0 && focusedDone === focusedTotal ? '✓' : '◷'}</span><div className="epic-selector-copy"><span>Epic needing work</span><div className="epic-selector-select-row"><select value={focusedEpicId} onChange={(event) => selectEpic(event.target.value)} aria-label="Epic needing work">{epics.map((epic) => { const children = epicGroups.find((group) => group.epic.id === epic.id)?.children || []; const done = children.filter((story) => story.manual !== null).length; return <option value={epic.id} key={epic.id}>{epic.title} · {done}/{children.length} done</option>; })}</select></div></div><span className="epic-selector-progress">{focusedDone}/{focusedTotal}</span><span className="epic-selector-status">{focusedTotal > 0 && focusedDone === focusedTotal ? 'Done' : focusedTotal ? 'In progress' : 'No stories'}</span></div> : null}
+    <div className="story-queues">{visibleGroups.map((group) => { const storyCount = group.children.length; const estimated = group.children.filter((story) => story.manual !== null).length; return group.epic ? <div className="story-queue-group" key={group.key}><div className="story-queue-group-heading"><div><span className="queue-group-icon">◆</span><span><strong>{group.label}</strong><small>Epic · {storyCount} linked {storyCount === 1 ? 'story' : 'stories'}</small></span></div><div className="story-queue-group-heading-actions"><span className="queue-group-count">{estimated}/{storyCount}</span>{canManage ? <><button className="story-action-button" type="button" disabled={voting} onClick={() => onEdit(group.epic!)} aria-label={`Edit ${group.label}`}>✎</button><button className="story-action-button danger-action" type="button" disabled={voting || stories.length <= 1} onClick={() => onDelete(group.epic!)} aria-label={`Delete ${group.label}`}>×</button></> : null}</div></div><div className="story-list">{group.children.length ? group.children.map(storyRow) : <p className="empty-manager">No stories linked to this epic yet.</p>}</div></div> : <div className="story-list" key={group.key}>{group.children.map(storyRow)}</div>; })}</div>
     <div className="queue-footer"><span className="icon">◷</span>{voting ? 'Queue actions are paused while the round is live.' : 'Select a story to estimate, edit, reorder, or import more work.'}</div>
   </section>;
 }
@@ -75,12 +102,14 @@ function formatDuration(startedAt: string | null, now: number): string {
 }
 
 export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoin, onClearVotes, onRemoveVoter }: EstimatesPageProps) {
-  const [selectedId, setSelectedId] = useState(state.selectedStoryId || state.stories[0]?.id || '');
+  const firstEstimableStory = state.stories.find((story) => story.type !== 'Epic');
+  const initialStory = state.stories.find((story) => story.id === state.selectedStoryId && story.type !== 'Epic') || firstEstimableStory;
+  const [selectedId, setSelectedId] = useState(initialStory?.id || '');
   const [manual, setManual] = useState<number | null>(null);
   const [ai, setAi] = useState<number | null>(null);
   const [modal, setModal] = useState<{ kind: 'edit'; story: Story | null; type?: string } | { kind: 'import' } | null>(null);
   const [now, setNow] = useState(Date.now());
-  const selectedStory = state.stories.find((story) => story.id === selectedId) || state.stories[0];
+  const selectedStory = state.stories.find((story) => story.id === selectedId && story.type !== 'Epic') || firstEstimableStory;
   const values = sequences[state.sequence].values;
   const canManage = room.role === 'owner' || room.role === 'admin' || user.role === 'admin';
   const round = state.round;
@@ -109,21 +138,23 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
     }
   }, [currentPlayer?.ai, currentPlayer?.manual, currentVote?.ai, currentVote?.manual, isVoting, selectedId, selectedStory]);
 
-  const progressLabel = useMemo(() => `${state.stories.filter((story) => story.manual !== null).length} of ${state.stories.length} estimated`, [state.stories]);
+  const estimableStories = state.stories.filter((story) => story.type !== 'Epic');
+  const progressLabel = useMemo(() => `${estimableStories.filter((story) => story.manual !== null).length} of ${estimableStories.length} estimated`, [estimableStories]);
   if (!selectedStory) return <div className="empty-state"><div className="empty-state-icon">▦</div><h2>No stories yet</h2><p>Create or import a story to begin planning.</p></div>;
+  const currentStory = selectedStory;
 
   async function saveEstimate() {
     const next = cloneState(state);
-    next.selectedStoryId = selectedStory.id;
-    next.round.storyId = selectedStory.id;
-    next.stories = next.stories.map((story) => story.id === selectedStory.id ? { ...story, manual, ai, aiEnabled: ai !== null, saved: manual !== null } : story);
+    next.selectedStoryId = currentStory.id;
+    next.round.storyId = currentStory.id;
+    next.stories = next.stories.map((story) => story.id === currentStory.id ? { ...story, manual, ai, aiEnabled: ai !== null, saved: manual !== null } : story);
     await onSave(next);
   }
 
   async function startRound() {
     const next = cloneState(state);
-    next.selectedStoryId = selectedStory.id;
-    next.round = { ...next.round, phase: 'voting', mode: state.roomSettings.voteMode, hideVoteCountUntilComplete: state.roomSettings.hideVoteCountUntilComplete, storyId: selectedStory.id, roundNumber: Math.max(1, state.round.roundNumber), submittedCount: 0, votes: {}, cardFlipped: false, revealedAt: null, timerStartedAt: new Date().toISOString(), timerEndsAt: null };
+    next.selectedStoryId = currentStory.id;
+    next.round = { ...next.round, phase: 'voting', mode: state.roomSettings.voteMode, hideVoteCountUntilComplete: state.roomSettings.hideVoteCountUntilComplete, storyId: currentStory.id, roundNumber: Math.max(1, state.round.roundNumber), submittedCount: 0, votes: {}, cardFlipped: false, revealedAt: null, timerStartedAt: new Date().toISOString(), timerEndsAt: null };
     await onSave(next);
   }
 
@@ -153,7 +184,7 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
   }
 
   async function skipStory() {
-    const nextStory = state.stories.find((story) => story.manual === null && story.type !== 'Epic' && story.id !== selectedStory.id);
+    const nextStory = state.stories.find((story) => story.manual === null && story.type !== 'Epic' && story.id !== currentStory.id);
     if (!nextStory) return;
     const next = cloneState(state);
     next.selectedStoryId = nextStory.id;
@@ -184,16 +215,16 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
       next.stories.push({ ...draft, id });
     } else {
       next.stories = next.stories.map((story) => story.id === id ? { ...draft, id } : story);
-      if (draft.type === 'Epic') next.stories = next.stories.map((story) => story.epicId === id ? { ...story, epicId: null } : story);
     }
-    next.selectedStoryId = id;
-    next.round.storyId = next.round.storyId || id;
-    setSelectedId(id);
+    const nextSelectedStory = next.stories.find((candidate) => candidate.id === id && candidate.type !== 'Epic') || next.stories.find((candidate) => candidate.id === selectedId && candidate.type !== 'Epic') || next.stories.find((candidate) => candidate.type !== 'Epic');
+    next.selectedStoryId = nextSelectedStory?.id || null;
+    next.round.storyId = nextSelectedStory?.id || null;
+    setSelectedId(nextSelectedStory?.id || '');
     await onSave(next);
     setModal(null);
   }
 
-  async function importStories(imported: Story[]) {
+  async function importStories(imported: Story[], epicId: string | null) {
     const next = cloneState(state);
     const existing = new Set(next.stories.map((story) => story.id));
     let nextId = nextImportedStoryId(next.stories);
@@ -204,11 +235,14 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
         nextId = `PL-${Number(nextId.replace(/\D/g, '')) + 1}`;
       }
       existing.add(id);
-      return { ...story, id };
+      return { ...story, id, epicId: story.type === 'Epic' ? null : epicId };
     });
     next.stories.push(...added);
-    next.selectedStoryId = added[0]?.id || next.selectedStoryId;
-    setSelectedId(next.selectedStoryId || '');
+    const firstAddedStory = added.find((story) => story.type !== 'Epic');
+    const nextSelectedStory = firstAddedStory || next.stories.find((story) => story.id === selectedId && story.type !== 'Epic') || next.stories.find((story) => story.type !== 'Epic');
+    next.selectedStoryId = nextSelectedStory?.id || null;
+    next.round.storyId = nextSelectedStory?.id || null;
+    setSelectedId(nextSelectedStory?.id || '');
     await onSave(next);
     setModal(null);
   }
@@ -217,10 +251,10 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
     if (state.stories.length <= 1 || !window.confirm(`Delete ${story.title}?`)) return;
     const next = cloneState(state);
     next.stories = next.stories.filter((candidate) => candidate.id !== story.id).map((candidate) => candidate.epicId === story.id ? { ...candidate, epicId: null } : candidate);
-    const fallback = next.stories[0];
-    next.selectedStoryId = fallback.id;
-    if (next.round.storyId === story.id) next.round = { ...next.round, phase: 'idle', storyId: fallback.id, roundNumber: 1, votes: {}, submittedCount: 0, revealedAt: null, timerStartedAt: null, timerEndsAt: null };
-    setSelectedId(fallback.id);
+    const fallback = next.stories.find((candidate) => candidate.type !== 'Epic') || next.stories[0];
+    next.selectedStoryId = fallback?.id || null;
+    if (next.round.storyId === story.id) next.round = { ...next.round, phase: 'idle', storyId: fallback?.id || null, roundNumber: 1, votes: {}, submittedCount: 0, revealedAt: null, timerStartedAt: null, timerEndsAt: null };
+    setSelectedId(fallback?.id || '');
     await onSave(next);
   }
 
@@ -244,7 +278,7 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
 
   return <>
     <div className="hero-row"><div><p className="eyebrow">{room.piLabel} · planning room</p><h1>Make the estimate visible.</h1><p className="hero-copy">Bring the story context, team votes, and final point value into one shared workspace.</p></div><div className="pi-meta"><div className="pi-meta-icon">PI</div><div className="pi-meta-copy"><span>Current room</span><strong>{room.name}</strong></div></div></div>
-    <div className="summary-grid"><div className="summary-card"><div className="summary-top"><span className="summary-label">Stories</span><span className="summary-icon">▤</span></div><div className="summary-value">{state.stories.length}</div><div className="summary-foot">Ready for the next discussion</div></div><div className="summary-card"><div className="summary-top"><span className="summary-label">Estimated</span><span className="summary-icon">✓</span></div><div className="summary-value">{state.stories.filter((story) => story.manual !== null).length}<small>/ {state.stories.length}</small></div><div className="progress-bar"><span style={{ width: `${state.stories.length ? (state.stories.filter((story) => story.manual !== null).length / state.stories.length) * 100 : 0}%` }} /></div></div><div className="summary-card"><div className="summary-top"><span className="summary-label">Planners</span><span className="summary-icon">♟</span></div><div className="summary-value">{room.memberCount}</div><div className="summary-foot">People in this room</div></div><div className="summary-card"><div className="summary-top"><span className="summary-label">Round</span><span className="summary-icon">◷</span></div><div className="summary-value">{round.phase === 'voting' ? 'Live' : round.phase === 'revealed' ? 'Done' : 'Idle'}</div><div className="summary-foot">{round.phase === 'voting' ? (countVisible ? `${round.submittedCount} vote${round.submittedCount === 1 ? '' : 's'} submitted` : 'Votes are hidden until everyone submits') : progressLabel}</div></div></div>
+    <div className="summary-grid"><div className="summary-card"><div className="summary-top"><span className="summary-label">Stories</span><span className="summary-icon">▤</span></div><div className="summary-value">{estimableStories.length}</div><div className="summary-foot">Ready for the next discussion</div></div><div className="summary-card"><div className="summary-top"><span className="summary-label">Estimated</span><span className="summary-icon">✓</span></div><div className="summary-value">{estimableStories.filter((story) => story.manual !== null).length}<small>/ {estimableStories.length}</small></div><div className="progress-bar"><span style={{ width: `${estimableStories.length ? (estimableStories.filter((story) => story.manual !== null).length / estimableStories.length) * 100 : 0}%` }} /></div></div><div className="summary-card"><div className="summary-top"><span className="summary-label">Planners</span><span className="summary-icon">♟</span></div><div className="summary-value">{room.memberCount}</div><div className="summary-foot">People in this room</div></div><div className="summary-card"><div className="summary-top"><span className="summary-label">Round</span><span className="summary-icon">◷</span></div><div className="summary-value">{round.phase === 'voting' ? 'Live' : round.phase === 'revealed' ? 'Done' : 'Idle'}</div><div className="summary-foot">{round.phase === 'voting' ? (countVisible ? `${round.submittedCount} vote${round.submittedCount === 1 ? '' : 's'} submitted` : 'Votes are hidden until everyone submits') : progressLabel}</div></div></div>
     <div className="workspace-grid">
       <section className="card estimator-card">
         <div className="card-heading"><div><span className="story-progress">{selectedStory.id} · {selectedStory.type}</span><h2>Estimate this story</h2></div><label className="sequence-control">Sequence<select value={state.sequence} disabled={!canManage || saving} onChange={(event) => { const next = cloneState(state); next.sequence = event.target.value as RoomState['sequence']; void onSave(next); }}><option value="sequential">Sequential</option><option value="fibonacci">Fibonacci</option><option value="modified">Modified Fibonacci</option></select></label></div>
@@ -260,6 +294,6 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
     </div>
     {state.voteHistory.length ? <section className="card history-card" style={{ marginTop: 18 }}><div className="lower-card-heading"><div><h2>Vote history</h2><p>Revealed rounds saved for this planning room.</p></div><span>{state.voteHistory.length} votes</span></div><div className="table-scroll"><table className="history-table"><thead><tr><th>Story</th><th>Round</th><th>Planner</th><th>Manual</th><th>AI</th></tr></thead><tbody>{[...state.voteHistory].sort((left, right) => right.updatedAt?.localeCompare(left.updatedAt || '') || 0).slice(0, 30).map((entry) => <tr key={`${entry.storyId}-${entry.roundNumber}-${entry.voterId}`}><td>{state.stories.find((story) => story.id === entry.storyId)?.title || entry.storyId}</td><td>#{entry.roundNumber}</td><td>{entry.voterId === user.id ? 'You' : entry.voterName}</td><td className="table-score">{entry.manual ?? '—'}</td><td className="table-score">{entry.ai ?? '—'}</td></tr>)}</tbody></table></div></section> : null}
     {modal?.kind === 'edit' ? <StoryEditorModal key={`${modal.story?.id || 'new'}-${modal.type || ''}`} state={state} story={modal.story} initialType={modal.type} saving={saving} onClose={() => setModal(null)} onSave={saveStory} /> : null}
-    {modal?.kind === 'import' ? <ImportStoriesModal saving={saving} onClose={() => setModal(null)} onImport={importStories} /> : null}
+    {modal?.kind === 'import' ? <ImportStoriesModal epics={state.stories.filter((story) => story.type === 'Epic')} saving={saving} onClose={() => setModal(null)} onImport={importStories} /> : null}
   </>;
 }

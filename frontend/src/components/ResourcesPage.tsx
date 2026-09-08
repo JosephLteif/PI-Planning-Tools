@@ -5,26 +5,38 @@ import { cloneState } from '../state';
 type ResourcesPageProps = { state: RoomState; saving: boolean; onSave: (state: RoomState) => Promise<void> };
 type ResourceTab = 'service' | 'domain' | 'epic';
 
+function effectiveServiceLinks(state: RoomState, story: RoomState['stories'][number]) {
+  if (story.type !== 'Epic' && story.epicId) {
+    return state.stories.find((candidate) => candidate.id === story.epicId && candidate.type === 'Epic')?.serviceLinks || [];
+  }
+  return story.serviceLinks;
+}
+
 function allocationRows(state: RoomState, tab: ResourceTab) {
-  const savedStories = state.stories.filter((story) => story.manual !== null);
+  const savedStories = state.stories.filter((story) => story.type !== 'Epic' && story.manual !== null);
   const serviceNames = new Map(state.services.map((service) => [service.id, service.name]));
   const domainNames = new Map(state.domains.map((domain) => [domain.id, domain.name]));
   const totals = new Map<string, number>();
-  let unassigned = 0;
   savedStories.forEach((story) => {
-    const totalAllocation = story.serviceLinks.reduce((sum, link) => sum + link.allocation, 0);
-    story.serviceLinks.forEach((link) => {
-      const key = tab === 'service' ? link.serviceId : tab === 'domain' ? state.services.find((service) => service.id === link.serviceId)?.domainId || 'unassigned' : story.epicId || 'unassigned';
-      totals.set(key, (totals.get(key) || 0) + (story.manual || 0) * (link.allocation / 100));
+    const links = effectiveServiceLinks(state, story);
+    const totalAllocation = links.reduce((sum, link) => sum + link.allocation, 0);
+    const denominator = totalAllocation > 100 ? totalAllocation : 100;
+    links.forEach((link) => {
+      const service = state.services.find((candidate) => candidate.id === link.serviceId);
+      const key = tab === 'service'
+        ? serviceNames.has(link.serviceId) ? link.serviceId : 'unassigned'
+        : tab === 'domain'
+          ? service?.domainId && domainNames.has(service.domainId) ? service.domainId : 'unassigned'
+          : story.epicId || 'unassigned';
+      totals.set(key, (totals.get(key) || 0) + (story.manual || 0) * (link.allocation / denominator));
     });
-    if (totalAllocation < 100) {
+    if (totalAllocation < 100 || !links.length) {
       const key = tab === 'epic' ? story.epicId || 'unassigned' : 'unassigned';
-      unassigned += (story.manual || 0) * ((100 - totalAllocation) / 100);
-      if (tab === 'epic') totals.set(key, (totals.get(key) || 0) + (story.manual || 0) * ((100 - totalAllocation) / 100));
+      totals.set(key, (totals.get(key) || 0) + (story.manual || 0) * ((100 - totalAllocation) / 100 || 1));
     }
   });
   const labels = tab === 'service' ? serviceNames : tab === 'domain' ? domainNames : new Map(state.stories.filter((story) => story.type === 'Epic').map((story) => [story.id, story.title]));
-  return [...totals.entries()].filter(([key]) => key !== 'unassigned' || !labels.has(key)).map(([key, points]) => ({ id: key, name: labels.get(key) || 'Unassigned', points })).concat(unassigned && tab !== 'epic' ? [{ id: 'unassigned', name: 'Unassigned', points: unassigned }] : []).sort((left, right) => right.points - left.points);
+  return [...totals.entries()].map(([key, points]) => ({ id: key, name: labels.get(key) || 'Unassigned', points })).sort((left, right) => right.points - left.points);
 }
 
 function entityId(prefix: string, ids: string[]) {
@@ -40,7 +52,7 @@ export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
   const [serviceName, setServiceName] = useState('');
   const [serviceDomain, setServiceDomain] = useState('');
   const rows = useMemo(() => allocationRows(state, tab), [state, tab]);
-  const total = state.stories.filter((story) => story.manual !== null).reduce((sum, story) => sum + (story.manual || 0), 0);
+  const total = state.stories.filter((story) => story.type !== 'Epic' && story.manual !== null).reduce((sum, story) => sum + (story.manual || 0), 0);
 
   async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

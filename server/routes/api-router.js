@@ -70,6 +70,14 @@ export async function handleApiRequest(request, env) {
   await ensureDefaultRoomMembership(env.DB, user);
   const roomId = roomIdFromRequest(request);
 
+  if (url.pathname === '/api/teams' && request.method === 'GET') {
+    return json({ teams: await readTeams(env.DB, user.id) });
+  }
+  if (url.pathname === '/api/teams' && request.method === 'POST') {
+    const team = await createTeam(env.DB, user, await readJson(request));
+    return json({ ok: true, team }, 201);
+  }
+
   const teamMemberPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)\/members$/);
   if (teamMemberPathMatch && request.method === 'POST') {
     const teamId = decodeURIComponent(teamMemberPathMatch[1]);
@@ -120,13 +128,6 @@ export async function handleApiRequest(request, env) {
   if (url.pathname === '/api/rooms' && request.method === 'POST') {
     const created = await createRoom(env.DB, user, await readJson(request));
     return json({ ok: true, roomId: created.room.id, room: created.room, memberCount: created.memberCount, state: created.state }, 201);
-  }
-  if (url.pathname === '/api/teams' && request.method === 'GET') {
-    return json({ teams: await readTeams(env.DB, user.id) });
-  }
-  if (url.pathname === '/api/teams' && request.method === 'POST') {
-    const team = await createTeam(env.DB, user, await readJson(request));
-    return json({ ok: true, team }, 201);
   }
   if (url.pathname === '/api/admin/users' && request.method === 'GET') {
     requireAdmin(user);

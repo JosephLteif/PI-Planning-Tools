@@ -72,18 +72,11 @@ export function AdminPage({ users, currentUserId, saving, onCreate, onUpdate, on
   return <div className="management-content">
     <div className="hero-row">
       <div><p className="eyebrow">Workspace · administration</p><h1>Manage Pointline users.</h1><p className="hero-copy">Create member accounts and share temporary credentials privately. Passwords are never returned by the list endpoint.</p></div>
-      <section className="card">
-        <p className="section-kicker">Migration</p>
-        <h2>Move this workspace</h2>
-        <p className="hero-copy">Export rooms, epics, stories, estimates, teams, memberships, rounds, votes, capacity, invites, and user accounts for another Pointline instance.</p>
-        <div className="footer-actions">
-          <button className="outline-button" type="button" disabled={saving} onClick={() => void onExport()}>Export backup</button>
-          <label className="outline-button" htmlFor="pointline-backup-input">Import backup</label>
-          <input id="pointline-backup-input" type="file" accept=".json,application/json" hidden disabled={saving} onChange={selectBackup} />
-        </div>
-        <small>Backups contain password hashes so imported users keep their credentials. Treat the JSON file as sensitive.</small>
-      </section>
     </div>
+    <section className="card migration-card">
+      <div className="migration-card-copy"><p className="section-kicker">Migration</p><h2>Move this workspace</h2><p>Export rooms, epics, stories, estimates, teams, memberships, rounds, votes, capacity, invites, and user accounts for another Pointline instance.</p><small>Backups contain password hashes so imported users keep their credentials. Treat the JSON file as sensitive.</small></div>
+      <div className="migration-card-actions"><button className="outline-button" type="button" disabled={saving} onClick={() => void onExport()}>Export backup</button><label className="outline-button" htmlFor="pointline-backup-input">Import backup</label><input id="pointline-backup-input" type="file" accept=".json,application/json" hidden disabled={saving} onChange={selectBackup} /></div>
+    </section>
     <section className="admin-layout">
       <section className="card admin-create-card">
         <div className="section-heading"><div><p className="section-kicker">{editing ? 'Account settings' : 'New account'}</p><h2>{editing ? 'Edit ' + editing.name : 'Create a user'}</h2></div></div>

@@ -43,7 +43,7 @@ The hosted Node service uses Pointline username/password accounts and the config
 
 After sign-in:
 
-- each Pointline account is stored in the configured database and automatically joins the shared PI 24 room;
+- each Pointline account is stored in the configured database and automatically joins the shared PI71 Planning room;
 - the Rooms page creates separate planning rooms with their own story queue and membership;
 - the Team page creates reusable teams, and invite links can add a person to a team, add a person to a room, or bring a team into a room;
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in the configured database;

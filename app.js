@@ -5,7 +5,7 @@ const WORKSPACE_KEY = 'pointline-workspace-v1';
 const THEME_KEY = 'pointline-theme-v1';
 const SIDEBAR_COLLAPSED_KEY = 'pointline-sidebar-collapsed-v1';
 const RESOURCE_TAB_KEY = 'pointline-resource-tab-v1';
-const LOCAL_DEFAULT_ROOM_ID = 'local-commerce';
+const LOCAL_DEFAULT_ROOM_ID = 'local-pi71';
 
 function loadTheme() {
   try {
@@ -193,7 +193,7 @@ const defaultState = {
 };
 
 const defaultWorkspace = {
-  rooms: [{ id: LOCAL_DEFAULT_ROOM_ID, name: 'Commerce platform', piLabel: 'PI 24', memberCount: 1, role: 'owner' }],
+  rooms: [{ id: LOCAL_DEFAULT_ROOM_ID, name: 'PI71 Planning', piLabel: 'PI 71', memberCount: 1, role: 'owner' }],
   teams: [{
     id: 'local-team-commerce',
     name: 'Commerce planning',
@@ -1077,7 +1077,7 @@ function renderRoomsPage() {
   </section>
   <section class="management-section">
     <div class="section-heading"><div><p class="section-kicker">Your rooms</p><h2>Planning rooms</h2></div><span class="section-count">${cloud.rooms.length} ${cloud.rooms.length === 1 ? 'room' : 'rooms'}</span></div>
-    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${isAdmin() || (room.role === 'owner' && room.id !== 'pi-24-commerce' && room.id !== LOCAL_DEFAULT_ROOM_ID) ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Delete room</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
+    <div class="room-directory">${cloud.rooms.length ? cloud.rooms.map((room) => `<article class="room-card ${room.id === cloud.roomId ? 'is-current' : ''}"><div class="room-card-top"><span class="room-status-dot"></span><span>${room.id === cloud.roomId ? 'Current room' : 'Available room'}</span></div><h3>${escapeHTML(room.name)}</h3><p>${escapeHTML(room.piLabel)} · ${Math.max(1, Number(room.memberCount) || 1)} ${Number(room.memberCount) === 1 ? 'person' : 'people'}</p><div class="room-card-footer"><span>${room.role === 'owner' ? 'Owner' : room.role === 'admin' ? 'Administrator' : 'Member'}</span><div class="room-card-actions"><button class="outline-button" type="button" data-open-room="${escapeHTML(room.id)}">${room.id === cloud.roomId ? 'Open room' : 'Switch room'}${icon('chevron')}</button>${isAdmin() || (room.role === 'owner' && room.id !== LOCAL_DEFAULT_ROOM_ID) ? `<button class="outline-button danger-outline" type="button" data-delete-room="${escapeHTML(room.id)}">Delete room</button>` : ''}</div></div></article>`).join('') : '<div class="empty-state"><span class="empty-state-icon">+</span><h3>No rooms yet</h3><p>Create a room to start a focused planning session.</p></div>'}</div>
   </section>`;
 }
 
@@ -2003,7 +2003,7 @@ async function deleteRoomRecord(roomId) {
     showToast('Only the room owner or a workspace admin can delete a room');
     return;
   }
-  if (!isAdmin() && (room.id === 'pi-24-commerce' || room.id === LOCAL_DEFAULT_ROOM_ID)) {
+  if (!isAdmin() && room.id === LOCAL_DEFAULT_ROOM_ID) {
     showToast('The default room cannot be deleted');
     return;
   }
