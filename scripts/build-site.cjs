@@ -53,7 +53,7 @@ fs.cpSync(path.join(project, 'drizzle'), path.join(dist, '.openai', 'drizzle'), 
 const workerSource = fs.readFileSync(path.join(project, 'server', 'index.js'), 'utf8');
 const builtWorker = workerSource.replace(
   'const STATIC_ASSETS = new Map();',
-  `const STATIC_ASSETS = new Map(${JSON.stringify(assets)});`,
+  () => `const STATIC_ASSETS = new Map(${JSON.stringify(assets)});`,
 );
 if (builtWorker === workerSource) throw new Error('Static asset marker was not found in server/index.js');
 fs.writeFileSync(path.join(dist, 'server', 'index.js'), builtWorker);
