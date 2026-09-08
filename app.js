@@ -238,6 +238,7 @@ const siteRuntime = {
   enabled: window.location.hostname.endsWith('.chatgpt.site'),
   ready: false,
   socket: null,
+  eventSource: null,
   realtimeRetryTimer: null,
   realtimeRetryDelay: 1000,
   saveTimers: new Map(),
@@ -2883,6 +2884,15 @@ function stopSiteRealtime() {
       // The socket may already have closed.
     }
   }
+  const eventSource = siteRuntime.eventSource;
+  siteRuntime.eventSource = null;
+  if (eventSource) {
+    try {
+      eventSource.close();
+    } catch {
+      // The event stream may already have closed.
+    }
+  }
   if (siteRuntime.realtimeRetryTimer) {
     clearTimeout(siteRuntime.realtimeRetryTimer);
     siteRuntime.realtimeRetryTimer = null;
@@ -2946,31 +2956,91 @@ async function handleRealtimeRoomDeleted() {
 function startSiteRealtime() {
   if (!siteRuntime.ready) return;
   stopSiteRealtime();
-  if (!window.WebSocket) {
+  if (!window.WebSocket && !window.EventSource) {
     cloud.status = 'error';
     updateCloudStatusBadge();
     return;
   }
 
-  const connect = () => {
-    if (!siteRuntime.ready || siteRuntime.socket) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const roomId = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api/state/socket${roomId}`);
-    siteRuntime.socket = socket;
+  const roomQuery = cloud.roomId ? `?room=${encodeURIComponent(cloud.roomId)}` : '';
+  const scheduleReconnect = (connect) => {
+    if (!siteRuntime.ready || siteRuntime.realtimeRetryTimer) return;
+    cloud.status = 'connecting';
+    updateCloudStatusBadge();
+    const delay = siteRuntime.realtimeRetryDelay;
+    siteRuntime.realtimeRetryDelay = Math.min(delay * 2, 15000);
+    siteRuntime.realtimeRetryTimer = window.setTimeout(() => {
+      siteRuntime.realtimeRetryTimer = null;
+      connect();
+    }, delay);
+  };
 
-    const scheduleReconnect = () => {
-      if (!siteRuntime.ready || siteRuntime.socket !== socket || siteRuntime.realtimeRetryTimer) return;
-      siteRuntime.socket = null;
-      cloud.status = 'connecting';
+  const handleRealtimeMessage = (data) => {
+    try {
+      const message = typeof data === 'string' ? JSON.parse(data) : data;
+      if (message.type === 'state') applyRealtimeState(message);
+      if (message.type === 'room-deleted') {
+        handleRealtimeRoomDeleted().catch((error) => {
+          console.warn('Pointline room deletion update failed', error);
+        });
+      }
+    } catch (error) {
+      console.warn('Pointline realtime state message was invalid', error);
+    }
+  };
+
+  const connectEventStream = () => {
+    if (!siteRuntime.ready || siteRuntime.eventSource) return;
+    if (!window.EventSource) return;
+    cloud.status = 'connecting';
+    updateCloudStatusBadge();
+    const source = new EventSource(`/api/state/stream${roomQuery}`);
+    siteRuntime.eventSource = source;
+    source.addEventListener('open', () => {
+      if (siteRuntime.eventSource !== source) return;
+      siteRuntime.realtimeRetryDelay = 1000;
+      cloud.status = 'synced';
       updateCloudStatusBadge();
-      const delay = siteRuntime.realtimeRetryDelay;
-      siteRuntime.realtimeRetryDelay = Math.min(delay * 2, 15000);
-      siteRuntime.realtimeRetryTimer = window.setTimeout(() => {
-        siteRuntime.realtimeRetryTimer = null;
-        connect();
-      }, delay);
-    };
+      flushPendingRealtimeState();
+    });
+    source.addEventListener('state', (event) => {
+      if (siteRuntime.eventSource !== source) return;
+      handleRealtimeMessage(event.data);
+    });
+    source.addEventListener('error', () => {
+      if (siteRuntime.eventSource !== source) return;
+      siteRuntime.eventSource = null;
+      source.close();
+      scheduleReconnect(connectEventStream);
+    });
+  };
+
+  const fallbackToEventStream = () => {
+    if (!window.EventSource || siteRuntime.eventSource) return false;
+    const socket = siteRuntime.socket;
+    siteRuntime.socket = null;
+    if (socket) {
+      try {
+        socket.close();
+      } catch {
+        // The socket may already have closed.
+      }
+    }
+    connectEventStream();
+    return true;
+  };
+
+  const connectSocket = () => {
+    if (!siteRuntime.ready || siteRuntime.socket || siteRuntime.eventSource) return;
+    if (!window.WebSocket) {
+      connectEventStream();
+      return;
+    }
+    cloud.status = 'connecting';
+    updateCloudStatusBadge();
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${window.location.host}/api/state/socket${roomQuery}`);
+    siteRuntime.socket = socket;
 
     socket.addEventListener('open', () => {
       if (siteRuntime.socket !== socket) return;
@@ -2981,27 +3051,33 @@ function startSiteRealtime() {
     });
     socket.addEventListener('message', (event) => {
       if (siteRuntime.socket !== socket) return;
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'state') applyRealtimeState(message);
-        if (message.type === 'room-deleted') handleRealtimeRoomDeleted();
-      } catch (error) {
-        console.warn('Pointline realtime state message was invalid', error);
-      }
+      handleRealtimeMessage(event.data);
     });
     socket.addEventListener('error', () => {
       if (siteRuntime.socket !== socket) return;
-      scheduleReconnect();
+      if (fallbackToEventStream()) return;
+      siteRuntime.socket = null;
+      scheduleReconnect(connectSocket);
       try {
         socket.close();
       } catch {
         // The socket may already have closed.
       }
     });
-    socket.addEventListener('close', scheduleReconnect);
+    socket.addEventListener('close', () => {
+      if (siteRuntime.socket !== socket) return;
+      siteRuntime.socket = null;
+      if (fallbackToEventStream()) return;
+      scheduleReconnect(connectSocket);
+    });
   };
 
-  connect();
+  // Sites currently cancels WebSocket upgrades; its named event stream keeps the same realtime contract.
+  if (siteRuntime.enabled || !window.WebSocket) {
+    connectEventStream();
+  } else {
+    connectSocket();
+  }
 }
 
 function hasActiveEditor() {
