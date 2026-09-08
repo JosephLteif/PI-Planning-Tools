@@ -882,8 +882,13 @@ function renderVoteResults(entries) {
   const minimum = manualVotes.length ? Math.min(...manualVotes) : null;
   const maximum = manualVotes.length ? Math.max(...manualVotes) : null;
   const spread = minimum === null ? null : maximum - minimum;
-  const currentEstimate = getSelectedStory()?.manual;
-  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Manual average</span><strong>${formatScore(average)}</strong></div><div><span>AI average</span><strong>${formatScore(aiAverage)}</strong></div><div><span>Nearest manual card</span><strong>${formatScore(nearestValue)}</strong></div><div><span>Manual spread</span><strong>${formatScore(spread)}</strong></div></div>${renderVotePlayers(getRoundPlayers(), true)}<div class="vote-result-actions">${nearestValue === null ? '' : `<button class="outline-button compact-button" type="button" data-apply-round-average>${icon('check')}Use ${formatScore(nearestValue)} as team estimate</button>`}<label class="vote-override"><span>Override final vote</span><input type="number" min="0" step="0.5" value="${currentEstimate === null || currentEstimate === undefined ? '' : escapeHTML(currentEstimate)}" placeholder="—" data-round-override aria-label="Override final team vote" /></label><button class="primary-button compact-button" type="button" data-apply-round-override>Apply override</button></div><p class="vote-result-note">Use the nearest manual card for the team estimate, or enter an override when the room agrees on another value. AI votes remain a comparison.</p></div>`;
+  const story = getSelectedStory();
+  const teamEstimate = story?.manual ?? average;
+  const aiEstimate = story?.ai ?? aiAverage;
+  const aiOverride = state.roomSettings.aiEnabled
+    ? `<label class="vote-override"><span>Final AI estimate</span><input type="number" min="0" step="0.5" value="${aiEstimate === null || aiEstimate === undefined ? '' : escapeHTML(aiEstimate)}" placeholder="—" data-round-ai-estimate aria-label="Final AI estimate" /></label>`
+    : '';
+  return `<div class="vote-results"><div class="vote-results-summary"><div><span>Manual average</span><strong>${formatScore(average)}</strong></div><div><span>AI average</span><strong>${formatScore(aiAverage)}</strong></div><div><span>Nearest manual card</span><strong>${formatScore(nearestValue)}</strong></div><div><span>Manual spread</span><strong>${formatScore(spread)}</strong></div></div>${renderVotePlayers(getRoundPlayers(), true)}<div class="vote-result-actions"><label class="vote-override"><span>Final team estimate</span><input type="number" min="0" step="0.5" value="${teamEstimate === null || teamEstimate === undefined ? '' : escapeHTML(teamEstimate)}" placeholder="—" data-round-team-estimate aria-label="Final team estimate" /></label>${aiOverride}<button class="outline-button compact-button" type="button" data-save-round-estimates>${icon('check')}Save estimates</button><button class="primary-button compact-button" type="button" data-save-round-next>Save & next story ${icon('chevron')}</button></div><p class="vote-result-note">Adjust either final estimate if the room agrees on a different value. Saving records both values on the story.</p></div>`;
 }
 
 function renderVotePanel(story) {
@@ -1730,8 +1735,8 @@ function bindEvents() {
   document.querySelector('[data-leave-voting]')?.addEventListener('click', () => setVoteParticipation(false));
   document.querySelector('[data-flip-card]')?.addEventListener('click', flipVoteCard);
   document.querySelector('[data-reveal-votes]')?.addEventListener('click', revealVotes);
-  document.querySelector('[data-apply-round-average]')?.addEventListener('click', applyRoundAverage);
-  document.querySelector('[data-apply-round-override]')?.addEventListener('click', applyRoundOverride);
+  document.querySelector('[data-save-round-estimates]')?.addEventListener('click', () => saveRoundEstimates());
+  document.querySelector('[data-save-round-next]')?.addEventListener('click', () => saveRoundEstimates(true));
   document.querySelector('[data-clear-votes]')?.addEventListener('click', clearVotes);
   document.querySelector('[data-reset-round]')?.addEventListener('click', resetRound);
   document.querySelector('[data-skip-story]')?.addEventListener('click', skipStory);
@@ -2364,37 +2369,46 @@ function recordCurrentRoundHistory() {
   ]);
 }
 
-function applyRoundAverage() {
-  const story = getSelectedStory();
-  const average = getRoundManualAverage();
-  const nearestValue = getNearestSequenceValue(average);
-  if (story?.type === 'Epic' || nearestValue === null) {
-    showToast('A manual room vote is needed before applying an average');
+function saveRoundEstimates(moveToNext = false) {
+  if (!canModerateRoom()) {
+    showToast('Only the room owner or an admin can save final estimates');
     return;
   }
-  story.manual = nearestValue;
-  story.saved = true;
-  saveState();
-  render();
-  showToast(`Nearest card value ${formatScore(nearestValue)} applied — choose another value to override it`);
-}
-
-function applyRoundOverride() {
-  const input = document.querySelector('[data-round-override]');
-  const value = input?.value.trim() || '';
-  const estimate = value === '' ? null : normalizeEstimate(value);
-  if (estimate === null) {
-    showToast('Enter a zero or positive number to override the final vote');
-    input?.focus();
+  const teamInput = document.querySelector('[data-round-team-estimate]');
+  const aiInput = document.querySelector('[data-round-ai-estimate]');
+  const teamValue = teamInput?.value.trim() || '';
+  const aiValue = aiInput?.value.trim() || '';
+  const teamEstimate = teamValue === '' ? null : normalizeEstimate(teamValue);
+  const aiEstimate = aiValue === '' ? null : normalizeEstimate(aiValue);
+  if (teamEstimate === null) {
+    showToast('Enter a zero or positive final team estimate');
+    teamInput?.focus();
+    return;
+  }
+  if (aiValue !== '' && aiEstimate === null) {
+    showToast('Enter a zero or positive final AI estimate');
+    aiInput?.focus();
     return;
   }
   const story = getSelectedStory();
   if (!story || story.type === 'Epic') return;
-  story.manual = estimate;
+  story.manual = teamEstimate;
+  story.ai = aiEstimate;
+  story.aiEnabled = aiEstimate !== null;
   story.saved = true;
+  if (moveToNext) {
+    const stories = state.stories.filter((candidate) => candidate.type !== 'Epic');
+    const currentIndex = stories.findIndex((candidate) => candidate.id === story.id);
+    const nextStory = stories.slice(currentIndex + 1).find((candidate) => candidate.manual === null)
+      || stories.find((candidate) => candidate.manual === null && candidate.id !== story.id);
+    if (nextStory) {
+      state.selectedStoryId = nextStory.id;
+      state.round = makeRound(nextStory.id, state.roomSettings.voteMode, getNextRoundNumber(nextStory.id));
+    }
+  }
   saveState();
   render();
-  showToast(`Final team vote overridden to ${formatScore(estimate)}`);
+  showToast(moveToNext && state.selectedStoryId !== story.id ? `Estimates saved — next story: ${state.selectedStoryId}` : 'Final team and AI estimates saved');
 }
 
 function revealVotes() {
