@@ -101,19 +101,68 @@ export default function App() {
 
   useEffect(() => {
     if (sessionStatus !== 'signed-in' || !selectedRoomId) return undefined;
-    const stream = new EventSource(`/api/state/stream?room=${encodeURIComponent(selectedRoomId)}`);
-    const handleState = (event: Event) => {
+    let active = true;
+    let socket: WebSocket | null = null;
+    let stream: EventSource | null = null;
+    const roomQuery = `?room=${encodeURIComponent(selectedRoomId)}`;
+    const applyPayload = (candidate: RoomPayload) => {
       try {
-        const payload = normalizeRoomPayload(JSON.parse((event as MessageEvent<string>).data) as RoomPayload);
-        if (payload.roomId === selectedRoomId) setRoomPayload(payload);
+        const payload = normalizeRoomPayload(candidate);
+        if (payload.roomId !== selectedRoomId) return;
+        setRoomPayload((current) => payload.room.stateVersion !== undefined
+          && current?.room.stateVersion !== undefined
+          && payload.room.stateVersion < current.room.stateVersion
+          ? current
+          : payload);
       } catch {
-        // The next stream event or an explicit refresh will recover from malformed data.
+        // The next realtime event or an explicit refresh will recover from malformed data.
       }
     };
-    stream.addEventListener('state', handleState);
+
+    const handleSocketMessage = (event: MessageEvent<string>) => {
+      try {
+        const message = JSON.parse(event.data) as { event?: string; data?: RoomPayload; payload?: RoomPayload };
+        if (message.event && message.event !== 'state') return;
+        applyPayload(message.data || message.payload || message as unknown as RoomPayload);
+      } catch {
+        // The fallback stream or the next socket message can recover from malformed data.
+      }
+    };
+
+    const connectStream = () => {
+      if (!active || stream) return;
+      stream = new EventSource(`/api/state/stream${roomQuery}`);
+      stream.addEventListener('state', (event) => {
+        try {
+          applyPayload(JSON.parse((event as MessageEvent<string>).data) as RoomPayload);
+        } catch {
+          // The next stream event or an explicit refresh will recover from malformed data.
+        }
+      });
+    };
+
+    if (window.WebSocket) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${window.location.host}/api/state/socket${roomQuery}`);
+      socket.addEventListener('message', handleSocketMessage);
+      socket.addEventListener('error', () => {
+        socket?.close();
+        connectStream();
+      });
+      socket.addEventListener('close', () => {
+        socket = null;
+        connectStream();
+      });
+    } else {
+      connectStream();
+    }
+
     return () => {
-      stream.removeEventListener('state', handleState);
-      stream.close();
+      active = false;
+      socket?.close();
+      stream?.close();
+      socket = null;
+      stream = null;
     };
   }, [sessionStatus, selectedRoomId]);
 

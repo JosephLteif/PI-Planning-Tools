@@ -26,6 +26,7 @@ import { addTeamMember, createTeam, deleteTeam, promoteTeamOwner, readTeams, rem
 import {
   addRoomMembers,
   createRoom,
+  createRoomWebSocket,
   createRoomStream,
   deleteRoom,
   publishRoomState,
@@ -176,6 +177,11 @@ export async function handleApiRequest(request, env) {
   if (url.pathname === '/api/state' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);
     return json({ roomId, ...room });
+  }
+  if (url.pathname === '/api/state/socket' && request.method === 'GET') {
+    const room = await readRoomState(env.DB, roomId, user.id);
+    const response = createRoomWebSocket(roomId, user.id, { ...room });
+    return response || json({ error: 'WebSocket upgrades are not supported by this runtime' }, 426);
   }
   if (url.pathname === '/api/state/stream' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);

@@ -101,6 +101,12 @@ function formatDuration(startedAt: string | null, now: number): string {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+function displayVote(value: number | null, submitted: boolean, revealed: boolean): string {
+  if (value !== null) return String(value);
+  if (revealed) return '—';
+  return submitted ? 'Hidden' : 'Waiting';
+}
+
 export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoin, onClearVotes, onRemoveVoter }: EstimatesPageProps) {
   const firstEstimableStory = state.stories.find((story) => story.type !== 'Epic');
   const initialStory = state.stories.find((story) => story.id === state.selectedStoryId && story.type !== 'Epic') || firstEstimableStory;
@@ -121,6 +127,13 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
   const countVisible = !round.hideVoteCountUntilComplete || !joinedPlayers.length || round.submittedCount >= joinedPlayers.length;
 
   useEffect(() => {
+    const synchronizedStoryId = round.phase === 'idle' ? state.selectedStoryId : round.storyId;
+    if (synchronizedStoryId && synchronizedStoryId !== selectedId && state.stories.some((story) => story.id === synchronizedStoryId && story.type !== 'Epic')) {
+      setSelectedId(synchronizedStoryId);
+    }
+  }, [round.phase, round.storyId, selectedId, state.selectedStoryId, state.stories]);
+
+  useEffect(() => {
     if (!round.timerStartedAt || round.phase !== 'voting') return undefined;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -136,7 +149,7 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
       setManual(selectedStory.manual);
       setAi(selectedStory.ai);
     }
-  }, [currentPlayer?.ai, currentPlayer?.manual, currentVote?.ai, currentVote?.manual, isVoting, selectedId, selectedStory]);
+  }, [currentPlayer?.ai, currentPlayer?.manual, currentVote?.ai, currentVote?.manual, isVoting, selectedId, selectedStory?.ai, selectedStory?.aiEnabled, selectedStory?.id, selectedStory?.manual]);
 
   const estimableStories = state.stories.filter((story) => story.type !== 'Epic');
   const progressLabel = useMemo(() => `${estimableStories.filter((story) => story.manual !== null).length} of ${estimableStories.length} estimated`, [estimableStories]);
@@ -287,8 +300,15 @@ export function EstimatesPage({ room, state, user, saving, onSave, onVote, onJoi
           <div className="estimate-fields"><EstimateField label="Manual estimate" helper="The team’s delivery estimate" values={values} value={manual} disabled={(isVoting && !currentPlayer?.joined) || (!isVoting && !canManage)} onChange={setManual} /><EstimateField label="AI comparison" helper={state.roomSettings.aiEnabled ? 'Optional comparison point' : 'AI comparison is disabled for this room'} values={values} value={ai} ai disabled={!state.roomSettings.aiEnabled || (isVoting && !currentPlayer?.joined) || (!isVoting && !canManage)} onChange={setAi} /></div>
         </div>
         <div className="estimator-footer"><div className="status-message"><span className="icon">◷</span>{isVoting ? (currentPlayer?.joined ? (countVisible ? `${round.submittedCount} vote${round.submittedCount === 1 ? '' : 's'} submitted` : 'Votes hidden until complete') : 'You have not joined this round') : selectedStory.manual === null ? 'No final estimate saved' : `Final estimate: ${selectedStory.manual}`}</div><div className="footer-actions">{isVoting && !currentPlayer?.joined ? <button className="outline-button" type="button" disabled={saving} onClick={() => void onJoin(true)}>Join round</button> : null}{isVoting && currentPlayer?.joined ? <><button className="outline-button" type="button" disabled={saving} onClick={() => void onJoin(false)}>Leave round</button><button className="primary-button" type="button" disabled={saving || (manual === null && ai === null)} onClick={() => void onVote(manual, ai)}>Submit vote</button></> : null}{round.phase === 'idle' && canManage ? <><button className="primary-button" type="button" disabled={saving} onClick={() => void startRound()}>Start round</button><button className="outline-button" type="button" disabled={saving} onClick={() => void saveEstimate()}>Save estimate</button></> : null}{isVoting && canManage ? <><button className="outline-button" type="button" disabled={saving} onClick={() => void revealRound()}>Reveal votes</button><button className="outline-button" type="button" disabled={saving} onClick={() => void onClearVotes()}>Clear votes</button><button className="outline-button" type="button" disabled={saving} onClick={() => void resetTimer()}>Reset timer</button><button className="outline-button" type="button" disabled={saving} onClick={() => void skipStory()}>Skip story</button></> : null}{isRevealed && canManage ? <><button className="outline-button" type="button" disabled={saving} onClick={() => void resetRound()}>Next round</button><button className="primary-button" type="button" disabled={saving} onClick={() => void saveEstimate()}>Save final estimate</button></> : null}</div></div>
-        {isRevealed ? <div className="pl-vote-summary">{Object.entries(round.votes).map(([id, vote]) => <div className="pl-vote-row" key={id}><span>{vote.name}</span><strong>{vote.manual ?? '—'}</strong>{vote.ai !== null ? <small>AI {vote.ai}</small> : null}</div>)}</div> : null}
-        {isVoting ? <div className="pl-vote-summary">{round.players.filter((player) => player.joined).map((player) => <div className="pl-vote-row" key={player.id}><span>{player.name}{player.id === user.id ? ' · You' : ''}</span><strong>{player.hasVoted ? (round.mode === 'open' || player.id === user.id ? player.manual ?? '—' : 'Submitted') : 'Waiting'}</strong>{canManage && player.id !== user.id ? <button className="story-action-button danger-action" type="button" onClick={() => void onRemoveVoter(player.id)} aria-label={`Remove ${player.name}`}>×</button> : null}</div>)}</div> : null}
+        {isRevealed || isVoting ? <div className="pl-vote-summary">{round.players.map((player) => {
+          const teamEstimate = displayVote(player.manual, player.manualSubmitted, isRevealed);
+          const aiEstimate = state.roomSettings.aiEnabled ? displayVote(player.ai, player.aiSubmitted, isRevealed) : 'Disabled';
+          return <div className="pl-vote-row" key={player.id}>
+            <div className="pl-vote-person"><span>{player.name}{player.id === user.id ? ' · You' : ''}</span><small>{player.joined ? (player.hasVoted ? 'Vote submitted' : 'Waiting for vote') : 'Not joined'}</small></div>
+            <div className="pl-vote-estimates"><span className={`pl-vote-estimate${teamEstimate === 'Hidden' || teamEstimate === 'Waiting' ? ' is-pending' : ''}`}><small>Team</small><strong>{teamEstimate}</strong></span><span className={`pl-vote-estimate${aiEstimate === 'Hidden' || aiEstimate === 'Waiting' ? ' is-pending' : ''}`}><small>AI</small><strong>{aiEstimate}</strong></span></div>
+            {canManage && player.id !== user.id && player.joined ? <button className="story-action-button danger-action" type="button" onClick={() => void onRemoveVoter(player.id)} aria-label={`Remove ${player.name}`}>×</button> : null}
+          </div>;
+        })}</div> : null}
       </section>
       <StoryQueue stories={state.stories} selectedId={selectedStory.id} canManage={canManage} voting={isVoting} onSelect={selectStory} onNew={(type) => editStory(null, type)} onImport={() => setModal({ kind: 'import' })} onEdit={(story) => editStory(story)} onMove={(id, direction) => void moveStory(id, direction)} onDelete={(story) => void deleteStory(story)} onRevote={(story) => void revoteStory(story)} />
     </div>

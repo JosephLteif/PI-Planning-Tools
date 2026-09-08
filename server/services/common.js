@@ -12,6 +12,7 @@ export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_ITERATIONS = 100000;
 export const MAX_BODY_BYTES = 1_500_000;
 export const ROOM_STREAMS = new Map();
+export const ROOM_SOCKETS = new Map();
 
 export const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',

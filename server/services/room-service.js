@@ -2,6 +2,7 @@ import {
   ALLOWED_PHASES,
   ALLOWED_SEQUENCES,
   ROOM_ID_PATTERN,
+  ROOM_SOCKETS,
   ROOM_STREAMS,
   authError,
   cleanId,
@@ -254,17 +255,52 @@ export async function readRoomState(db, roomId, userId) {
   };
 }
 
-export async function publishRoomState(db, roomId) {
+async function publishRoomStateNow(db, roomId) {
   const streams = ROOM_STREAMS.get(roomId) || new Set();
-  if (!streams.size) return;
-  await Promise.all([...streams].map(async (subscriber) => {
-    try {
-      const payload = await readRoomState(db, roomId, subscriber.userId);
-      subscriber.controller.enqueue(subscriber.encoder.encode(streamEvent('state', { roomId, ...payload })));
-    } catch {
-      subscriber.cleanup();
-    }
-  }));
+  const sockets = ROOM_SOCKETS.get(roomId) || new Set();
+  if (!streams.size && !sockets.size) return;
+  await Promise.all([
+    ...[...streams].map(async (subscriber) => {
+      try {
+        const payload = await readRoomState(db, roomId, subscriber.userId);
+        subscriber.controller.enqueue(subscriber.encoder.encode(streamEvent('state', { roomId, ...payload })));
+      } catch {
+        subscriber.cleanup();
+      }
+    }),
+    ...[...sockets].map(async (subscriber) => {
+      try {
+        const payload = await readRoomState(db, roomId, subscriber.userId);
+        subscriber.send(JSON.stringify({ event: 'state', data: { roomId, ...payload } }));
+      } catch {
+        subscriber.cleanup();
+      }
+    }),
+  ]);
+}
+
+const roomPublicationChains = new Map();
+
+export function publishRoomState(db, roomId) {
+  const previous = roomPublicationChains.get(roomId) || Promise.resolve();
+  const queued = previous.catch(() => {}).then(() => publishRoomStateNow(db, roomId));
+  roomPublicationChains.set(roomId, queued);
+  return queued.finally(() => {
+    if (roomPublicationChains.get(roomId) === queued) roomPublicationChains.delete(roomId);
+  });
+}
+
+export function registerRoomSocket(roomId, subscriber) {
+  const sockets = ROOM_SOCKETS.get(roomId) || new Set();
+  sockets.add(subscriber);
+  ROOM_SOCKETS.set(roomId, sockets);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    sockets.delete(subscriber);
+    if (!sockets.size) ROOM_SOCKETS.delete(roomId);
+  };
 }
 
 export function closeRoomSubscribers(roomId) {
@@ -277,6 +313,42 @@ export function closeRoomSubscribers(roomId) {
     }
   }
   ROOM_STREAMS.delete(roomId);
+  for (const subscriber of ROOM_SOCKETS.get(roomId) || []) {
+    subscriber.cleanup();
+    try {
+      subscriber.close();
+    } catch {
+      // The client may already have disconnected.
+    }
+  }
+  ROOM_SOCKETS.delete(roomId);
+}
+
+export function createRoomWebSocket(roomId, userId, initialPayload) {
+  if (typeof WebSocketPair !== 'function') return null;
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const server = pair[1];
+  server.accept();
+  const subscriber = {
+    userId,
+    send(message) {
+      server.send(message);
+    },
+    close() {
+      server.close();
+    },
+  };
+  const unregister = registerRoomSocket(roomId, subscriber);
+  subscriber.cleanup = unregister;
+  const cleanup = () => unregister();
+  server.addEventListener('close', cleanup);
+  server.addEventListener('error', cleanup);
+  server.addEventListener('message', (event) => {
+    if (event.data === 'ping') server.send('pong');
+  });
+  subscriber.send(JSON.stringify({ event: 'state', data: { roomId, ...initialPayload } }));
+  return new Response(null, { status: 101, webSocket: client });
 }
 
 export function createRoomStream(roomId, userId, initialPayload) {

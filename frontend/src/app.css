@@ -23,7 +23,13 @@
 .round-badge { padding: 5px 8px; color: var(--blue); background: var(--blue-soft); border-radius: 6px; font-size: 9px; font-weight: 800; }
 .pl-vote-summary { display: grid; gap: 6px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); }
 .pl-vote-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 9px 11px; background: #f8fafc; border-radius: 8px; font-size: 11px; }
-.pl-vote-row strong { font-family: 'Space Grotesk', sans-serif; font-size: 15px; }
+.pl-vote-person { display: grid; gap: 3px; min-width: 0; }
+.pl-vote-person span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-vote-estimates { display: grid; grid-template-columns: repeat(2, minmax(58px, auto)); gap: 12px; }
+.pl-vote-estimate { display: grid; gap: 2px; min-width: 0; text-align: right; }
+.pl-vote-estimate small { color: var(--ink-soft); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.pl-vote-estimate strong { font-family: 'Space Grotesk', sans-serif; font-size: 15px; }
+.pl-vote-estimate.is-pending strong { color: var(--ink-soft); font-family: inherit; font-size: 10px; font-weight: 700; }
 .pl-vote-row small { color: var(--ink-soft); font-size: 10px; }
 .pl-management-grid { display: grid; grid-template-columns: minmax(250px, .75fr) minmax(0, 1.25fr); gap: 18px; align-items: start; }
 .pl-form-card, .pl-list-card, .pl-settings-card, .pl-placeholder { padding: 25px; }

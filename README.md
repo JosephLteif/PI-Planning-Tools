@@ -49,7 +49,7 @@ After sign-in:
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in the configured database;
 - votes are stored per account, story, and round;
 - hidden rounds return only your own vote plus the submitted count; open and revealed rounds return the room’s votes;
-- the browser subscribes to the room state stream while open so teammates can estimate the same story concurrently.
+- the browser opens an authenticated WebSocket for room state updates while open, with the existing SSE stream as a transport fallback so teammates can estimate the same story concurrently.
 
 The Estimates view keeps one active story in focus for the room. Each participant can submit a separate vote for that story, and hidden votes remain private until the round is revealed.
 
