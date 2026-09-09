@@ -242,13 +242,22 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
             <h2>Resource allocation</h2>
             <p>{estimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories.`}</p>
           </div>
-          <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
-            <span className="allocation-estimate-toggle-label">Show</span>
-            {(['team', 'ai', 'gain'] as const).map((view) => (
-              <button key={view} className={`allocation-estimate-option${estimateView === view ? ' active' : ''}`} type="button" aria-pressed={estimateView === view} onClick={() => setEstimateView(view)}>
-                {view === 'team' ? 'Team' : view === 'ai' ? 'AI' : 'AI gain'}
-              </button>
-            ))}
+          <div className="allocation-heading-controls">
+            <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
+              <span className="allocation-estimate-toggle-label">Show</span>
+              {(['team', 'ai', 'gain'] as const).map((view) => (
+                <button key={view} className={`allocation-estimate-option${estimateView === view ? ' active' : ''}`} type="button" aria-pressed={estimateView === view} onClick={() => setEstimateView(view)}>
+                  {view === 'team' ? 'Team' : view === 'ai' ? 'AI' : 'AI gain'}
+                </button>
+              ))}
+            </div>
+            <div className="allocation-tabs" role="tablist" aria-label="Resource breakdown">
+              {(['service', 'domain', 'epic'] as const).map((item) => (
+                <button key={item} className={`allocation-tab${tab === item ? ' active' : ''}`} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}>
+                  {item === 'service' ? 'By service' : item === 'domain' ? 'By domain' : 'By epic'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -273,14 +282,6 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
             <strong>{pairedStories.length}</strong>
             <small>{pairedStories.length === 1 ? 'story with both estimates' : 'stories with both estimates'}</small>
           </div>
-        </div>
-
-        <div className="allocation-tabs" role="tablist" aria-label="Resource breakdown">
-          {(['service', 'domain', 'epic'] as const).map((item) => (
-            <button key={item} className={`allocation-tab${tab === item ? ' active' : ''}`} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}>
-              {item === 'service' ? 'By service' : item === 'domain' ? 'By domain' : 'By epic'}
-            </button>
-          ))}
         </div>
 
         <div className="allocation-breakdown">

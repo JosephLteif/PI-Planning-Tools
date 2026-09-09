@@ -2827,6 +2827,19 @@ h1 {
   font-size: 10px;
 }
 
+.allocation-heading-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.allocation-heading-controls .allocation-estimate-toggle {
+  margin-top: 0;
+}
+
 .allocation-tabs {
   display: inline-flex;
   gap: 3px;
@@ -4248,11 +4261,11 @@ h1 {
 .capacity-defaults-card,
 .capacity-members-card,
 .capacity-sprint-card {
-  padding: 24px;
+  padding: 20px;
 }
 
 .capacity-summary-card {
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
 
 .capacity-layout > .card {
@@ -4269,23 +4282,23 @@ h1 {
 .capacity-defaults-card .settings-copy,
 .capacity-members-card .settings-copy {
   max-width: 74ch;
-  margin: 14px 0 20px;
+  margin: 11px 0 15px;
   line-height: 1.6;
 }
 
 .capacity-member-list {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .capacity-member-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150px 150px;
-  gap: 18px;
+  gap: 12px;
   align-items: end;
-  padding: 16px 18px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 9px;
   background: var(--canvas);
 }
 
@@ -4303,11 +4316,11 @@ h1 {
 
 .capacity-member-row label {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .capacity-sprint-card {
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 
 .capacity-sprint-fields {
@@ -4333,18 +4346,18 @@ h1 {
 .capacity-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin: 22px 0 24px;
+  gap: 8px;
+  margin: 16px 0 18px;
 }
 
 .capacity-summary-grid > div {
   display: grid;
   gap: 4px;
-  min-height: 70px;
   align-content: center;
-  padding: 14px 16px;
+  min-height: 56px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 9px;
   background: var(--canvas);
 }
 
@@ -4356,7 +4369,115 @@ h1 {
 
 .capacity-summary-grid strong {
   color: var(--ink);
-  font-size: 20px;
+  font-size: 18px;
+}
+
+.capacity-sprint-people {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+
+.capacity-sprint-people-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.capacity-sprint-people-heading > div,
+.capacity-sprint-person-name,
+.capacity-sprint-person-dev,
+.capacity-sprint-availability-field {
+  display: grid;
+  gap: 2px;
+}
+
+.capacity-sprint-people-heading strong {
+  font-size: 11px;
+}
+
+.capacity-sprint-people-heading span,
+.capacity-sprint-person-header,
+.capacity-sprint-person-name small,
+.capacity-sprint-person-dev small,
+.capacity-sprint-availability-field > small {
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.capacity-sprint-people-heading > span {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.capacity-sprint-person-list {
+  display: grid;
+  gap: 4px;
+}
+
+.capacity-sprint-person-header,
+.capacity-sprint-person-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 78px 100px 132px;
+  gap: 10px;
+  align-items: center;
+}
+
+.capacity-sprint-person-header {
+  padding: 0 10px 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.capacity-sprint-person-row {
+  min-height: 38px;
+  padding: 7px 10px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.capacity-sprint-person-name {
+  min-width: 0;
+}
+
+.capacity-sprint-person-name strong,
+.capacity-sprint-person-office,
+.capacity-sprint-person-dev strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capacity-sprint-person-office {
+  color: var(--ink-muted);
+}
+
+.capacity-sprint-person-dev strong {
+  font-size: 10px;
+}
+
+.capacity-sprint-availability-input {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.capacity-sprint-availability-field .compact-input {
+  width: 60px;
+  padding: 6px 7px;
+  font-size: 10px;
+}
+
+.capacity-sprint-availability-input > span {
+  color: var(--ink-muted);
+  font-size: 9px;
 }
 
 .capacity-table-wrap {
@@ -4429,6 +4550,12 @@ h1 {
   .capacity-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .capacity-sprint-person-header,
+  .capacity-sprint-person-row {
+    grid-template-columns: minmax(0, 1fr) 72px 92px 124px;
+    gap: 8px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -4446,6 +4573,43 @@ h1 {
 
   .capacity-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .allocation-heading-controls {
+    justify-content: flex-start;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .allocation-heading-controls .allocation-estimate-toggle {
+    margin-top: 12px;
+  }
+
+  .capacity-sprint-person-header {
+    display: none;
+  }
+
+  .capacity-sprint-person-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .capacity-sprint-person-office {
+    justify-self: end;
+  }
+
+  .capacity-sprint-person-dev {
+    display: flex;
+    grid-column: 1;
+    grid-row: 2;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .capacity-sprint-availability-field {
+    grid-column: 2;
+    grid-row: 2;
+    justify-items: end;
   }
 }
 

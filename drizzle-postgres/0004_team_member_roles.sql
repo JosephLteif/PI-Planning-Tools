@@ -7,4 +7,3 @@ WHERE "role" = 'developer'
     WHERE "room_members"."account_id" = "team_members"."account_id"
       AND "room_members"."role" = 'observer'
   );
-

@@ -15,4 +15,3 @@ SELECT `room_id`, `account_id`, CASE WHEN `role` = 'observer' THEN 'observer' WH
 FROM `room_members_legacy`;
 --> statement-breakpoint
 DROP TABLE `room_members_legacy`;
-

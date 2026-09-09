@@ -105,20 +105,20 @@ export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, o
           {selectedTeam.members.map((member) => <div className="pl-member-row" key={member.id}>
             <span className="avatar small-avatar">{member.name.slice(0, 1).toUpperCase()}</span>
             <span><strong>{member.name}</strong><small>{member.email}</small></span>
-            {member.role === 'owner' ? <span className="member-role">Owner</span> : canManageSelectedTeam ? <select
-              className="modal-input team-member-role-select"
-              value={member.role === 'observer' ? 'observer' : 'developer'}
-              disabled={saving}
-              onChange={(event) => void updateRole(member.id, event.target.value as 'developer' | 'observer')}
-              aria-label={`Role for ${member.name}`}
-            >
-              <option value="developer">Developer</option>
-              <option value="observer">Observer</option>
-            </select> : <span className="member-role">{member.role === 'observer' ? 'Observer' : 'Developer'}</span>}
             {canManageSelectedTeam && member.role !== 'owner' ? <div className="pl-member-actions">
+              <select
+                className="modal-input team-member-role-select"
+                value={member.role === 'observer' ? 'observer' : 'developer'}
+                disabled={saving}
+                onChange={(event) => void updateRole(member.id, event.target.value as 'developer' | 'observer')}
+                aria-label={`Role for ${member.name}`}
+              >
+                <option value="developer">Developer</option>
+                <option value="observer">Observer</option>
+              </select>
               <button className="outline-button" type="button" disabled={saving} onClick={() => void promoteMember(member.id, member.name)}>Make owner</button>
               <button className="outline-button danger-outline" type="button" disabled={saving} onClick={() => void removeMember(member.id, member.name)}>Remove</button>
-            </div> : null}
+            </div> : <span className="member-role">{member.role === 'owner' ? 'Owner' : member.role === 'observer' ? 'Observer' : 'Developer'}</span>}
           </div>)}
         </div>
       </section> : null}

@@ -94,4 +94,3 @@ export function AppIcon({ name, size = 16, strokeWidth = 1.9, className }: AppIc
 
   return <svg {...svgProps}>{nodes.map(([tag, attrs], index) => createElement(tag, { ...attrs, key: index }))}</svg>;
 }
-

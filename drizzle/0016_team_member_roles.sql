@@ -24,4 +24,3 @@ WHERE `role` = 'developer'
   );
 --> statement-breakpoint
 DROP TABLE `team_members_legacy`;
-

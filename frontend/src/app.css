@@ -111,7 +111,8 @@ html[data-theme='dark'] .ai-gain-chip { background: var(--surface); }
 .room-access-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .room-access-row small { color: var(--ink-soft); font-size: 9px; }
 .room-member-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
-.team-member-role-select { min-width: 108px; padding: 7px 8px; font-size: 10px; }
+.pl-member-actions { align-items: center; }
+.pl-member-actions .team-member-role-select { width: auto; min-width: 96px; max-width: 108px; flex: 0 0 auto; padding: 7px 8px; font-size: 10px; }
 .room-remove-button { flex: 0 0 auto; padding: 7px 9px; font-size: 10px; }
 .room-add-controls { margin-top: 18px; }
 .room-invite-controls { margin-top: 10px; }
