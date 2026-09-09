@@ -5,7 +5,18 @@ services:
     plan: free
     healthCheckPath: /healthz
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pointline-postgres
+          property: connectionString
       - key: POINTLINE_BOOTSTRAP_ADMIN_USERNAME
         sync: false
       - key: POINTLINE_BOOTSTRAP_ADMIN_PASSWORD
         sync: false
+
+databases:
+  - name: pointline-postgres
+    plan: free
+    databaseName: pointline
+    user: pointline
+    postgresMajorVersion: "17"

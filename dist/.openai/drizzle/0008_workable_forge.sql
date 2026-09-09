@@ -1,1 +1,0 @@
-ALTER TABLE `rooms` ADD `capacity_json` text DEFAULT '{}' NOT NULL;

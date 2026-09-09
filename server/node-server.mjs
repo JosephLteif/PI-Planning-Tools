@@ -5,25 +5,22 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import { handleApi } from './index.js';
-import { createPostgresDatabase, createSqliteDatabase } from './database.mjs';
+import { createPostgresDatabase } from './database.mjs';
 import { getSessionUser, roomIdFromRequest } from './services/common.js';
 import { requireMember } from './services/access-service.js';
 import { readRoomState, registerRoomSocket } from './services/room-service.js';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const frontendDirectory = join(projectRoot, 'frontend', 'dist');
-const migrationsDirectory = process.env.DATABASE_URL
-  ? join(projectRoot, 'drizzle-postgres')
-  : join(projectRoot, 'drizzle');
-const database = process.env.DATABASE_URL
-  ? await createPostgresDatabase({
-    connectionString: process.env.DATABASE_URL,
-    migrationsDirectory,
-  })
-  : createSqliteDatabase({
-    databasePath: process.env.POINTLINE_DB_PATH || join(projectRoot, 'data', 'pointline.sqlite'),
-    migrationsDirectory,
-  });
+const databaseUrl = process.env.DATABASE_URL?.trim();
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required. Pointline uses PostgreSQL for persistent storage.');
+}
+
+const database = await createPostgresDatabase({
+  connectionString: databaseUrl,
+  migrationsDirectory: join(projectRoot, 'drizzle-postgres'),
+});
 
 const env = {
   DB: database,

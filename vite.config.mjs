@@ -5,7 +5,6 @@ import react from '@vitejs/plugin-react';
 
 const projectRoot = path.resolve(import.meta.dirname, '.');
 const legacyAssets = [
-  ['app.js', 'application/javascript; charset=utf-8', path.join(projectRoot, 'app.js')],
   ['styles.css', 'text/css; charset=utf-8', path.join(projectRoot, 'styles.css')],
   ['favicon.svg', 'image/svg+xml', path.join(projectRoot, 'favicon.svg')],
   ['lucide.min.js', 'application/javascript; charset=utf-8', path.join(projectRoot, 'node_modules', 'lucide', 'dist', 'umd', 'lucide.min.js')],

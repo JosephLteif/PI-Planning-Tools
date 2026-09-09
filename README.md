@@ -4,42 +4,42 @@ Pointline is a lightweight PI planning estimation room with a team-owned estimat
 
 ## Run locally
 
-From PowerShell, set local bootstrap credentials first:
+Pointline requires PostgreSQL for its Node runtime. Start a PostgreSQL instance, then set the bootstrap credentials and connection string:
 
 ```powershell
 $env:POINTLINE_BOOTSTRAP_ADMIN_USERNAME = 'admin'
 $env:POINTLINE_BOOTSTRAP_ADMIN_PASSWORD = 'replace-with-a-random-password'
+$env:DATABASE_URL = 'postgresql://pointline:password@localhost:5432/pointline'
 .\start-pointline.ps1
 ```
 
-Open [http://localhost:8787/](http://localhost:8787/). Local accounts and room data are stored in `data/pointline.sqlite`.
+Open [http://localhost:8787/](http://localhost:8787/). Local accounts and room data are stored in the PostgreSQL database configured by `DATABASE_URL`.
 
 ## Self-host with Docker
 
-Copy `.env.example` to `.env`, replace the bootstrap password, and start the persistent container:
+Copy `.env.example` to `.env`, replace both example passwords, and start the persistent containers:
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up -d --build
 ```
 
-Open [http://localhost:8787/](http://localhost:8787/). Accounts and room data are stored in the `pointline-data` Docker volume. The bootstrap credentials create the first admin account on first sign-in.
+Open [http://localhost:8787/](http://localhost:8787/). Accounts and room data are stored in the `pointline-postgres-data` Docker volume. The bootstrap credentials create the first admin account on first sign-in.
 
-To hand someone the built image instead of the source, run `docker save -o pointline.tar pointline:latest`; they can load it with `docker load -i pointline.tar` and run it with the same environment variables and `/data` volume.
+To hand someone the built image instead of the source, run `docker save -o pointline.tar pointline:latest`; they can load it with `docker load -i pointline.tar` and run it with the same environment variables and PostgreSQL connection string.
 
 ## Application stack
 
 - React and Vite provide the frontend build and browser entrypoint.
 - Node and Fastify provide the HTTP server in Docker and hosted deployments.
 - Drizzle defines the relational schema and migrations.
-- SQLite is the default database stored at `/data/pointline.sqlite`.
-- Set `DATABASE_URL` to use the PostgreSQL adapter and generated PostgreSQL migration instead.
+- PostgreSQL is the required database for the Node runtime, using the generated migrations under `drizzle-postgres`.
 
-The React bundle is served by Fastify, and the Node API module handles the application routes directly. There is no Worker runtime in the self-hosted or hosted Node deployment.
+The React bundle is served by Fastify, and the Node API module handles the application routes directly.
 
 ## Hosted accounts and persistence
 
-The hosted Node service uses Pointline username/password accounts and the configured SQLite or PostgreSQL database. The first admin account is bootstrapped from `POINTLINE_BOOTSTRAP_ADMIN_USERNAME` and `POINTLINE_BOOTSTRAP_ADMIN_PASSWORD` runtime values.
+The hosted Node service uses Pointline username/password accounts and the configured PostgreSQL database. The first admin account is bootstrapped from `POINTLINE_BOOTSTRAP_ADMIN_USERNAME` and `POINTLINE_BOOTSTRAP_ADMIN_PASSWORD` runtime values.
 
 After sign-in:
 
@@ -63,4 +63,4 @@ The Admin page can export a versioned JSON backup containing accounts, rooms, ro
 
 Build and run the Node service with the included Dockerfile or with `npm start`. The server listens on `0.0.0.0` and honors the hosting platform's `PORT` value.
 
-For a low-resource public test deployment, [render.yaml](render.yaml) defines a free Render Docker web service. Free instances can sleep when idle and their local SQLite filesystem is ephemeral, so use PostgreSQL when the hosted data must survive restarts.
+For a low-resource public test deployment, [render.yaml](render.yaml) defines a free Render Docker web service and a managed PostgreSQL database. The Blueprint injects the database connection string into the web service so application data survives web-service restarts.
