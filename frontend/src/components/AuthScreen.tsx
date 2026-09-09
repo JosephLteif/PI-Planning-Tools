@@ -3,10 +3,11 @@ import { FormEvent, useState } from 'react';
 type AuthScreenProps = {
   error: string;
   loading: boolean;
+  switchingAccount?: boolean;
   onSubmit: (username: string, password: string) => Promise<void>;
 };
 
-export function AuthScreen({ error, loading, onSubmit }: AuthScreenProps) {
+export function AuthScreen({ error, loading, switchingAccount = false, onSubmit }: AuthScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -21,8 +22,8 @@ export function AuthScreen({ error, loading, onSubmit }: AuthScreenProps) {
         <section className="auth-card">
           <div className="auth-brand"><span className="brand-mark">P</span> Pointline</div>
           <p className="eyebrow">PI planning workspace</p>
-          <h1>Plan with clarity.</h1>
-          <p className="auth-copy">Sign in to open your shared estimation rooms and keep planning decisions in one place.</p>
+          <h1>{switchingAccount ? 'Switch account.' : 'Plan with clarity.'}</h1>
+          <p className="auth-copy">{switchingAccount ? 'Sign in with a different Pointline account to continue planning.' : 'Sign in to open your shared estimation rooms and keep planning decisions in one place.'}</p>
           <form className="auth-form" onSubmit={handleSubmit}>
             <label className="modal-field">
               <span>Username</span>
@@ -43,3 +44,4 @@ export function AuthScreen({ error, loading, onSubmit }: AuthScreenProps) {
     </main>
   );
 }
+

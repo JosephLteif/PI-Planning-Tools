@@ -62,7 +62,7 @@ export const teams = sqliteTable('teams', {
 export const teamMembers = sqliteTable('team_members', {
   teamId: text('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
   accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
-  role: text('role').notNull().default('member'),
+  role: text('role').notNull().default('developer'),
   createdAt: text('created_at').notNull(),
 }, (table) => ({
   teamMembersPk: primaryKey({ columns: [table.teamId, table.accountId] }),
@@ -179,3 +179,4 @@ export const votes = sqliteTable('votes', {
   votesPk: primaryKey({ columns: [table.roomId, table.storyKey, table.roundNumber, table.accountId] }),
   votesRoundIdx: index('votes_round_idx').on(table.roomId, table.storyKey, table.roundNumber),
 }));
+

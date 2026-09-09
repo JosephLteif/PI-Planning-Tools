@@ -189,11 +189,11 @@ export function removeRoomMember(roomId: string, accountId: string) {
   }).then(normalizeRoomPayload);
 }
 
-export function updateRoomMemberRole(roomId: string, accountId: string, role: 'developer' | 'observer') {
-  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(accountId)}`, {
+export function updateTeamMemberRole(teamId: string, accountId: string, role: 'developer' | 'observer') {
+  return request<{ ok: true; team: Team | null; roomIds: string[] }>(`/api/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(accountId)}`, {
     method: 'PATCH',
     body: { role },
-  }).then(normalizeRoomPayload);
+  });
 }
 
 export function removeRoomTeam(roomId: string, teamId: string) {
@@ -254,3 +254,4 @@ export function submitVote(
     body: { storyId, roundNumber, manual, ai, aiEnabled },
   });
 }
+

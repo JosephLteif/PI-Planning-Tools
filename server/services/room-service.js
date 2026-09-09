@@ -4,7 +4,6 @@ import {
   ROOM_ID_PATTERN,
   ROOM_SOCKETS,
   ROOM_STREAMS,
-  ROOM_MEMBER_ROLES,
   authError,
   cleanId,
   cleanStoryUrl,
@@ -15,7 +14,7 @@ import {
   parseAcceptance,
   parseScore,
   rows,
-  roomMemberRole,
+  teamMemberRole,
   streamEvent,
 } from './common.js';
 import { canManageRoom, requireRoomManager, requireTeamMember } from './access-service.js';
@@ -69,12 +68,16 @@ export async function readRoomState(db, roomId, userId) {
       WHERE v.room_id = ? AND (pr.phase = 'revealed' OR pr.mode = 'open')
         AND (v.manual_estimate IS NOT NULL OR v.ai_estimate IS NOT NULL)
       ORDER BY v.story_key, v.round_number, v.updated_at, v.account_id`).bind(roomId).all(),
-    db.prepare(`SELECT rm.account_id, rm.role, a.display_name, a.email
-      FROM room_members rm LEFT JOIN accounts a ON a.id = rm.account_id
-      WHERE rm.room_id = ? ORDER BY rm.role DESC, a.display_name, a.email`).bind(roomId).all(),
+    db.prepare(`SELECT rm.account_id, rm.role AS room_role, tm.role AS team_role, a.display_name, a.email
+      FROM room_members rm
+      LEFT JOIN team_members tm ON tm.account_id = rm.account_id
+      LEFT JOIN accounts a ON a.id = rm.account_id
+      WHERE rm.room_id = ? ORDER BY COALESCE(tm.role, rm.role) DESC, a.display_name, a.email`).bind(roomId).all(),
     db.prepare(`SELECT rvm.account_id FROM room_voting_members rvm
       JOIN room_members rm ON rm.room_id = rvm.room_id AND rm.account_id = rvm.account_id
-      WHERE rvm.room_id = ? AND rm.role <> 'observer'`).bind(roomId).all(),
+      JOIN rooms r ON r.id = rvm.room_id
+      LEFT JOIN team_members tm ON tm.account_id = rvm.account_id
+      WHERE rvm.room_id = ? AND (r.owner_account_id = rvm.account_id OR COALESCE(tm.role, 'developer') <> 'observer')`).bind(roomId).all(),
     db.prepare(`SELECT t.id AS team_id, t.name AS team_name, tm.account_id
       FROM team_members tm
       JOIN teams t ON t.id = tm.team_id
@@ -132,7 +135,7 @@ export async function readRoomState(db, roomId, userId) {
       id: member.account_id,
       name: member.display_name || member.email?.split('@')[0] || 'Planner',
       email: member.email || '',
-      role: roomMemberRole(member.role),
+      role: member.account_id === room.owner_account_id ? 'owner' : teamMemberRole(member.team_role),
       teamId: team?.id || null,
       teamName: team?.name || null,
     };
@@ -189,7 +192,10 @@ export async function readRoomState(db, roomId, userId) {
       JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
         AND p.round_number = v.round_number AND p.account_id = v.account_id
       JOIN room_members rm ON rm.room_id = v.room_id AND rm.account_id = v.account_id
-      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ? AND rm.role <> 'observer'`)
+      JOIN rooms r ON r.id = v.room_id
+      LEFT JOIN team_members tm ON tm.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?
+        AND (r.owner_account_id = v.account_id OR COALESCE(tm.role, 'developer') <> 'observer')`)
       .bind(roomId, round.storyId, round.roundNumber)
       .first();
     round.submittedCount = Number(countRow?.count) || 0;
@@ -459,7 +465,7 @@ export async function readRooms(db, user) {
     piLabel: room.pi_label,
     memberCount: Math.max(0, Number(room.member_count) || 0),
     teamCount: Math.max(0, Number(room.team_count) || 0),
-    role: user.role === 'admin' ? 'admin' : room.owner_account_id === user.id ? 'owner' : room.role === 'owner' ? 'owner' : 'member',
+    role: user.role === 'admin' ? 'admin' : room.owner_account_id === user.id ? 'owner' : 'member',
   }));
 }
 
@@ -470,22 +476,27 @@ export async function runBatches(db, statements) {
 }
 
 export async function saveRoomState(db, roomId, input, user) {
-  const room = await db.prepare('SELECT state_version FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  const room = await db.prepare('SELECT state_version, owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
   if (!room) {
     const error = new Error('Room not found');
     error.status = 404;
     throw error;
   }
-  const memberRosterResult = await db.prepare(`SELECT rm.account_id, rm.role, a.display_name, a.email
-    FROM room_members rm LEFT JOIN accounts a ON a.id = rm.account_id
+  const memberRosterResult = await db.prepare(`SELECT rm.account_id, rm.role AS room_role, tm.role AS team_role, a.display_name, a.email
+    FROM room_members rm
+    LEFT JOIN team_members tm ON tm.account_id = rm.account_id
+    LEFT JOIN accounts a ON a.id = rm.account_id
     WHERE rm.room_id = ?`).bind(roomId).all();
   const memberRows = rows(memberRosterResult);
   const currentMember = memberRows.find((member) => member.account_id === user.id);
-  if (user.role !== 'admin' && currentMember?.role === 'observer') {
+  const currentMemberRole = currentMember
+    ? currentMember.account_id === room.owner_account_id ? 'owner' : teamMemberRole(currentMember.team_role)
+    : null;
+  if (user.role !== 'admin' && currentMemberRole === 'observer') {
     throw authError('Observers have view-only access to this room', 403);
   }
   const capacityRoster = memberRows
-    .filter((member) => member.role !== 'observer')
+    .filter((member) => (member.account_id === room.owner_account_id ? 'owner' : teamMemberRole(member.team_role)) !== 'observer')
     .map((member) => ({
       id: member.account_id,
       name: member.display_name || member.email?.split('@')[0] || 'Planner',
@@ -603,41 +614,17 @@ export async function saveRoomState(db, roomId, input, user) {
         (room_id, story_key, round_number, account_id, joined_at)
         SELECT rvm.room_id, ?, ?, rvm.account_id, rvm.joined_at
         FROM room_voting_members rvm
-        JOIN room_members rm ON rm.room_id = rvm.room_id AND rm.account_id = rvm.account_id
-        WHERE rvm.room_id = ? AND rm.role <> 'observer' ON CONFLICT DO NOTHING`)
+         JOIN room_members rm ON rm.room_id = rvm.room_id AND rm.account_id = rvm.account_id
+         JOIN rooms r ON r.id = rvm.room_id
+         LEFT JOIN team_members tm ON tm.account_id = rvm.account_id
+         WHERE rvm.room_id = ?
+           AND (r.owner_account_id = rvm.account_id OR COALESCE(tm.role, 'developer') <> 'observer')
+         ON CONFLICT DO NOTHING`)
         .bind(source.round.storyId, source.round.roundNumber, roomId));
     }
   }
 
   await runBatches(db, statements);
-}
-
-export async function updateRoomMember(db, user, roomId, accountId, input) {
-  if (!roomId || !ROOM_ID_PATTERN.test(roomId)) throw authError('The room is invalid', 400);
-  const targetAccountId = cleanId(accountId);
-  const role = cleanText(input?.role, '', 20);
-  if (!targetAccountId) throw authError('The member is invalid', 400);
-  if (!ROOM_MEMBER_ROLES.has(role)) throw authError('Choose Developer or Observer', 400);
-  await requireRoomManager(db, roomId, user);
-  const room = await db.prepare('SELECT owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
-  const member = await db.prepare('SELECT account_id FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
-    .bind(roomId, targetAccountId).first();
-  if (!member) throw authError('Room member not found', 404);
-  if (room?.owner_account_id === targetAccountId) throw authError('Transfer room ownership before changing the owner role', 409);
-  const now = new Date().toISOString();
-  const statements = [
-    db.prepare('UPDATE room_members SET role = ? WHERE room_id = ? AND account_id = ?').bind(role, roomId, targetAccountId),
-    db.prepare('UPDATE rooms SET state_version = state_version + 1, updated_at = ? WHERE id = ?').bind(now, roomId),
-  ];
-  if (role === 'observer') {
-    statements.push(
-      db.prepare('DELETE FROM votes WHERE room_id = ? AND account_id = ?').bind(roomId, targetAccountId),
-      db.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND account_id = ?').bind(roomId, targetAccountId),
-      db.prepare('DELETE FROM room_voting_members WHERE room_id = ? AND account_id = ?').bind(roomId, targetAccountId),
-    );
-  }
-  await db.batch(statements);
-  return readRoomState(db, roomId, user.id);
 }
 
 export async function createRoom(db, user, input) {
@@ -768,3 +755,4 @@ export async function deleteRoom(db, user, roomId) {
   closeRoomSubscribers(roomId);
   return { ok: true, roomId };
 }
+

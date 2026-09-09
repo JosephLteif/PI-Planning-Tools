@@ -21,7 +21,7 @@ import {
   updateManagedUser,
 } from '../services/auth-service.js';
 import { canManageRoom, readDirectoryUsers, requireMember } from '../services/access-service.js';
-import { addTeamMember, createTeam, deleteTeam, promoteTeamOwner, readTeams, removeTeamMember } from '../services/team-service.js';
+import { addTeamMember, createTeam, deleteTeam, promoteTeamOwner, readTeams, removeTeamMember, updateTeamMemberRole } from '../services/team-service.js';
 import {
   addRoomMembers,
   createRoom,
@@ -34,7 +34,6 @@ import {
   readRoomState,
   readRooms,
   saveRoomState,
-  updateRoomMember,
   updateRoom,
 } from '../services/room-service.js';
 import { acceptInvite, createInvite, readInvite } from '../services/invite-service.js';
@@ -94,6 +93,13 @@ export async function handleApiRequest(request, env) {
     const team = await removeTeamMember(env.DB, user, teamId, cleanId(accountId));
     return json({ ok: true, team });
   }
+  if (teamMemberAccountPathMatch && (request.method === 'PUT' || request.method === 'PATCH')) {
+    const teamId = decodeURIComponent(teamMemberAccountPathMatch[1]);
+    const accountId = decodeURIComponent(teamMemberAccountPathMatch[2]);
+    const result = await updateTeamMemberRole(env.DB, user, teamId, cleanId(accountId), await readJson(request));
+    await Promise.all(result.roomIds.map((roomId) => publishRoomState(env.DB, roomId)));
+    return json({ ok: true, ...result });
+  }
 
   const teamOwnerPathMatch = url.pathname.match(/^\/api\/teams\/([^/]+)\/owner$/);
   if (teamOwnerPathMatch && request.method === 'POST') {
@@ -124,14 +130,6 @@ export async function handleApiRequest(request, env) {
     const targetRoomId = decodeURIComponent(roomMemberAccountPathMatch[1]);
     const accountId = decodeURIComponent(roomMemberAccountPathMatch[2]);
     const room = await removeRoomMember(env.DB, user, targetRoomId, accountId);
-    await publishRoomState(env.DB, targetRoomId);
-    return json({ ok: true, roomId: targetRoomId, ...room });
-  }
-
-  if (roomMemberAccountPathMatch && (request.method === 'PUT' || request.method === 'PATCH')) {
-    const targetRoomId = decodeURIComponent(roomMemberAccountPathMatch[1]);
-    const accountId = decodeURIComponent(roomMemberAccountPathMatch[2]);
-    const room = await updateRoomMember(env.DB, user, targetRoomId, accountId, await readJson(request));
     await publishRoomState(env.DB, targetRoomId);
     return json({ ok: true, roomId: targetRoomId, ...room });
   }
@@ -232,7 +230,14 @@ export async function handleApiRequest(request, env) {
     const storyId = cleanId(input.storyId);
     const roundNumber = Number(input.roundNumber);
     const targetAccountId = cleanId(input.accountId) || user.id;
-    const targetMember = await env.DB.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+    const targetMember = await env.DB.prepare(`SELECT CASE
+        WHEN r.owner_account_id = rm.account_id THEN 'owner'
+        ELSE COALESCE(tm.role, 'developer')
+      END AS role
+      FROM room_members rm
+      JOIN rooms r ON r.id = rm.room_id
+      LEFT JOIN team_members tm ON tm.account_id = rm.account_id
+      WHERE rm.room_id = ? AND rm.account_id = ? LIMIT 1`)
       .bind(roomId, targetAccountId).first();
     if (targetMember?.role === 'observer') {
       return json({ error: 'Observers can view this room but cannot join voting rounds' }, 403);
@@ -284,7 +289,14 @@ export async function handleApiRequest(request, env) {
     const input = await readJson(request);
     const storyId = cleanId(input.storyId);
     const roundNumber = Number(input.roundNumber);
-    const member = await env.DB.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+    const member = await env.DB.prepare(`SELECT CASE
+        WHEN r.owner_account_id = rm.account_id THEN 'owner'
+        ELSE COALESCE(tm.role, 'developer')
+      END AS role
+      FROM room_members rm
+      JOIN rooms r ON r.id = rm.room_id
+      LEFT JOIN team_members tm ON tm.account_id = rm.account_id
+      WHERE rm.room_id = ? AND rm.account_id = ? LIMIT 1`)
       .bind(roomId, user.id).first();
     if (member?.role === 'observer') {
       return json({ error: 'Observers can view this room but cannot submit votes' }, 403);
@@ -324,7 +336,10 @@ export async function handleApiRequest(request, env) {
       JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
         AND p.round_number = v.round_number AND p.account_id = v.account_id
       JOIN room_members rm ON rm.room_id = v.room_id AND rm.account_id = v.account_id
-      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ? AND rm.role <> 'observer'`).bind(roomId, storyId, roundNumber).first();
+      JOIN rooms r ON r.id = v.room_id
+      LEFT JOIN team_members tm ON tm.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?
+        AND (r.owner_account_id = v.account_id OR COALESCE(tm.role, 'developer') <> 'observer')`).bind(roomId, storyId, roundNumber).first();
     await publishRoomState(env.DB, roomId);
     return json({ ok: true, submittedCount: Number(count?.count) || 0 });
   }
@@ -343,3 +358,4 @@ export async function handleApiRequest(request, env) {
   }
   return json({ error: 'Not found' }, 404);
 }
+

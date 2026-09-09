@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateRoomMemberRole } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
 import { AdminPage } from './components/AdminPage';
+import { AppIcon } from './components/AppIcon';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
 import { CapacityPage } from './components/CapacityPage';
@@ -14,6 +15,7 @@ import type { Room, RoomPayload, RoomState, Team, User } from './types';
 import './app.css';
 
 type SessionStatus = 'loading' | 'signed-out' | 'signed-in';
+type AuthMode = 'sign-in' | 'switch-account';
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -22,6 +24,7 @@ function errorMessage(error: unknown): string {
 
 export default function App() {
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>('loading');
+  const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -180,6 +183,7 @@ export default function App() {
     try {
       const result = await login(username, password);
       setUser(result.user);
+      setAuthMode('sign-in');
       setSessionStatus('signed-in');
     } catch (error) {
       setAuthError(errorMessage(error));
@@ -197,6 +201,22 @@ export default function App() {
     setAdminUsers([]);
     setSelectedRoomId('');
     setRoomPayload(null);
+    setAuthMode('sign-in');
+    setSessionStatus('signed-out');
+    setView('estimates');
+  }
+
+  async function handleSwitchAccount() {
+    try { await logout(); } catch { /* A local session can still be cleared when the server is unavailable. */ }
+    setUser(null);
+    setRooms([]);
+    setTeams([]);
+    setDirectoryUsers([]);
+    setAdminUsers([]);
+    setSelectedRoomId('');
+    setRoomPayload(null);
+    setAuthError('');
+    setAuthMode('switch-account');
     setSessionStatus('signed-out');
     setView('estimates');
   }
@@ -338,6 +358,20 @@ export default function App() {
     }
   }
 
+  async function handleUpdateTeamMemberRole(teamId: string, accountId: string, role: 'developer' | 'observer') {
+    setSaving(true);
+    try {
+      const result = await updateTeamMemberRole(teamId, accountId, role);
+      if (result.team) setTeams((current) => current.map((team) => team.id === teamId ? result.team! : team));
+      if (selectedRoomId && result.roomIds.includes(selectedRoomId)) await refreshRoom(selectedRoomId);
+      setNotice(role === 'observer' ? 'Team member marked as observer' : 'Team member marked as developer');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDeleteTeam(teamId: string) {
     setSaving(true);
     try {
@@ -430,21 +464,6 @@ export default function App() {
       setRoomPayload(payload);
       setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
       setNotice('Member removed from room');
-    } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleUpdateRoomMemberRole(accountId: string, role: 'developer' | 'observer') {
-    if (!selectedRoomId) return;
-    setSaving(true);
-    try {
-      const payload = await updateRoomMemberRole(selectedRoomId, accountId, role);
-      setRoomPayload(payload);
-      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
-      setNotice(role === 'observer' ? 'Member marked as observer' : 'Member marked as developer');
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -569,20 +588,20 @@ export default function App() {
   }
 
   if (sessionStatus === 'loading') return <div className="pl-loading">Opening Pointline…</div>;
-  if (sessionStatus === 'signed-out' || !user) return <AuthScreen error={authError} loading={authLoading} onSubmit={handleLogin} />;
+  if (sessionStatus === 'signed-out' || !user) return <AuthScreen error={authError} loading={authLoading} switchingAccount={authMode === 'switch-account'} onSubmit={handleLogin} />;
   if (loadingWorkspace || !roomPayload || !selectedRoomId) return <div className="pl-loading">Loading your planning workspace…</div>;
 
   const room = roomPayload.room;
   const state = roomPayload.state;
   const isObserver = room.members?.some((member) => member.id === user.id && member.role === 'observer') === true;
   const content = !state
-    ? <section className="card pl-placeholder"><div className="sidebar-tip-icon">▦</div><h2>This room is ready for its first story</h2><p>Initialize the room with a starter story, then invite the team into the first estimation round.</p>{isObserver ? <p className="modal-hint">Observers can view the room once it has been initialized by a room manager.</p> : <button className="primary-button" type="button" disabled={saving} onClick={() => void handleSave(defaultRoomState())}>Initialize room</button>}</section>
+    ? <section className="card pl-placeholder"><div className="sidebar-tip-icon"><AppIcon name="listChecks" size={22} /></div><h2>This room is ready for its first story</h2><p>Initialize the room with a starter story, then invite the team into the first estimation round.</p>{isObserver ? <p className="modal-hint">Observers can view the room once it has been initialized by a room manager.</p> : <button className="primary-button" type="button" disabled={saving} onClick={() => void handleSave(defaultRoomState())}>Initialize room</button>}</section>
     : view === 'estimates'
       ? <EstimatesPage room={room} state={state} user={user} saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
       : view === 'rooms'
-        ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onUpdateMemberRole={handleUpdateRoomMemberRole} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
+        ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
-          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
+          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onUpdateMemberRole={handleUpdateTeamMemberRole} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
           : view === 'settings'
             ? <SettingsPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
             : view === 'capacity'
@@ -591,5 +610,6 @@ export default function App() {
                 ? <ResourcesPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
                 : <AdminPage users={adminUsers} currentUserId={user.id} saving={saving} onCreate={handleCreateAdminUser} onUpdate={handleUpdateAdminUser} onDelete={handleDeleteAdminUser} onExport={handleExportBackup} onImport={handleImportBackup} />;
 
-  return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSignOut={handleSignOut}>{content}</AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
+  return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSwitchAccount={handleSwitchAccount} onSignOut={handleSignOut}>{content}</AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
 }
+

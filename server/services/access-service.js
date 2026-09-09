@@ -5,7 +5,14 @@ export async function requireMember(db, roomId, user) {
     const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
     if (room) return { role: 'admin' };
   }
-  const member = await db.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+  const member = await db.prepare(`SELECT CASE
+      WHEN r.owner_account_id = rm.account_id THEN 'owner'
+      ELSE COALESCE(tm.role, 'developer')
+    END AS role
+    FROM room_members rm
+    JOIN rooms r ON r.id = rm.room_id
+    LEFT JOIN team_members tm ON tm.account_id = rm.account_id
+    WHERE rm.room_id = ? AND rm.account_id = ? LIMIT 1`)
     .bind(roomId, user?.id)
     .first();
   if (!member) {
@@ -47,3 +54,4 @@ export async function readDirectoryUsers(db) {
     FROM accounts WHERE disabled = 0 AND username IS NOT NULL ORDER BY display_name, username`).all();
   return rows(result).map(accountUser);
 }
+

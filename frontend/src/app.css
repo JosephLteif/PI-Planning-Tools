@@ -87,7 +87,7 @@ html[data-theme='dark'] .allocation-estimate-option.active { background: var(--s
 .room-access-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .room-access-row small { color: var(--ink-soft); font-size: 9px; }
 .room-member-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
-.room-member-role-select { min-width: 98px; padding: 7px 8px; font-size: 10px; }
+.team-member-role-select { min-width: 108px; padding: 7px 8px; font-size: 10px; }
 .room-remove-button { flex: 0 0 auto; padding: 7px 9px; font-size: 10px; }
 .room-add-controls { margin-top: 18px; }
 .room-invite-controls { margin-top: 10px; }
@@ -106,5 +106,6 @@ html[data-theme='dark'] .allocation-estimate-option.active { background: var(--s
 .pl-loading { display: grid; min-height: 100vh; color: var(--ink-muted); background: var(--canvas); place-items: center; font-size: 14px; }
 .pl-toast { position: fixed; right: 24px; bottom: 24px; z-index: 10; max-width: 360px; padding: 12px 15px; color: #fff; background: var(--navy); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; box-shadow: var(--shadow); font-size: 12px; }
 @media (max-width: 980px) { .pl-management-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; min-height: 0; } .sidebar-general-nav { margin-top: 18px; } .main-area { padding: 24px 18px 35px; } .topbar-actions { display: none; } .workspace-grid { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .estimate-fields { grid-template-columns: 1fr; } .hero-row { align-items: flex-start; flex-direction: column; } .pi-meta { width: 100%; } .room-settings-form, .room-access-overview { grid-template-columns: 1fr; } .room-settings-form .primary-button { justify-self: start; } .allocation-estimate-toggle { margin-top: 13px; } .epic-resource-story { align-items: flex-start; } }
+@media (max-width: 760px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; min-height: 0; } .sidebar-general-nav { margin-top: 18px; } .main-area { padding: 24px 18px 35px; } .topbar-actions { display: flex; } .pl-topbar-user { display: none; } .topbar-actions .outline-button { padding: 8px 10px; } .workspace-grid { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .estimate-fields { grid-template-columns: 1fr; } .hero-row { align-items: flex-start; flex-direction: column; } .pi-meta { width: 100%; } .room-settings-form, .room-access-overview { grid-template-columns: 1fr; } .room-settings-form .primary-button { justify-self: start; } .allocation-estimate-toggle { margin-top: 13px; } .epic-resource-story { align-items: flex-start; } }
 @media (max-width: 480px) { .summary-grid { grid-template-columns: 1fr; } .estimator-card { padding: 20px 16px; } .card-heading { display: grid; } .sequence-control { justify-content: space-between; } .estimator-footer { align-items: flex-start; flex-direction: column; } .footer-actions { flex-wrap: wrap; } .auth-card { padding: 25px 20px; } .pl-member-actions { width: 100%; margin-left: 0; } .pl-member-actions .outline-button { flex: 1; } }
+

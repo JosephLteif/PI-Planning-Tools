@@ -1,4 +1,4 @@
-import { authError, cleanText, makeId, rows } from './common.js';
+import { TEAM_MEMBER_ROLES, authError, cleanText, makeId, rows } from './common.js';
 
 function requireTeamManager(team, user) {
   if (user.role !== 'admin' && team.owner_account_id !== user.id) {
@@ -28,7 +28,7 @@ export async function addTeamMember(db, user, teamId, accountId) {
   const now = new Date().toISOString();
   await db.batch([
     db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
-      VALUES (?, ?, 'member', ?) ON CONFLICT DO NOTHING`).bind(teamId, accountId, now),
+      VALUES (?, ?, 'developer', ?) ON CONFLICT DO NOTHING`).bind(teamId, accountId, now),
     db.prepare('UPDATE teams SET updated_at = ? WHERE id = ?').bind(now, teamId),
   ]);
   return readUpdatedTeam(db, user, teamId);
@@ -63,11 +63,48 @@ export async function promoteTeamOwner(db, user, teamId, accountId) {
   if (team.owner_account_id === accountId && member.role === 'owner') return readUpdatedTeam(db, user, teamId);
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare("UPDATE team_members SET role = 'member' WHERE team_id = ? AND account_id = ?").bind(teamId, team.owner_account_id),
+    db.prepare("UPDATE team_members SET role = 'developer' WHERE team_id = ? AND account_id = ?").bind(teamId, team.owner_account_id),
     db.prepare("UPDATE team_members SET role = 'owner' WHERE team_id = ? AND account_id = ?").bind(teamId, accountId),
     db.prepare('UPDATE teams SET owner_account_id = ?, updated_at = ? WHERE id = ?').bind(accountId, now, teamId),
   ]);
   return readUpdatedTeam(db, user, teamId);
+}
+
+export async function updateTeamMemberRole(db, user, teamId, accountId, input) {
+  const team = await db.prepare('SELECT owner_account_id FROM teams WHERE id = ? LIMIT 1').bind(teamId).first();
+  if (!team) throw authError('Team not found', 404);
+  requireTeamManager(team, user);
+  const role = cleanText(input?.role, '', 20);
+  if (!TEAM_MEMBER_ROLES.has(role)) throw authError('Choose Developer or Observer', 400);
+  const member = await db.prepare('SELECT role FROM team_members WHERE team_id = ? AND account_id = ? LIMIT 1')
+    .bind(teamId, accountId)
+    .first();
+  if (!member) throw authError('Team member not found', 404);
+  if (team.owner_account_id === accountId || member.role === 'owner') {
+    throw authError('Transfer ownership before changing the owner role', 409);
+  }
+
+  const roomResult = await db.prepare('SELECT DISTINCT room_id FROM room_members WHERE account_id = ?')
+    .bind(accountId)
+    .all();
+  const roomIds = [...new Set(rows(roomResult).map((room) => room.room_id).filter(Boolean))];
+  const now = new Date().toISOString();
+  const statements = [
+    db.prepare('UPDATE team_members SET role = ? WHERE team_id = ? AND account_id = ?').bind(role, teamId, accountId),
+    db.prepare('UPDATE teams SET updated_at = ? WHERE id = ?').bind(now, teamId),
+    ...roomIds.map((roomId) => db.prepare('UPDATE rooms SET state_version = state_version + 1, updated_at = ? WHERE id = ?').bind(now, roomId)),
+  ];
+  if (role === 'observer') {
+    roomIds.forEach((roomId) => {
+      statements.push(
+        db.prepare('DELETE FROM votes WHERE room_id = ? AND account_id = ?').bind(roomId, accountId),
+        db.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND account_id = ?').bind(roomId, accountId),
+        db.prepare('DELETE FROM room_voting_members WHERE room_id = ? AND account_id = ?').bind(roomId, accountId),
+      );
+    });
+  }
+  await db.batch(statements);
+  return { team: await readUpdatedTeam(db, user, teamId), roomIds };
 }
 
 export async function deleteTeam(db, user, teamId) {
@@ -112,7 +149,7 @@ export async function readTeams(db, userId, includeAll = false) {
         id: member.id,
         name: member.display_name || member.email?.split('@')[0] || 'Planner',
         email: member.email || '',
-        role: member.role === 'owner' ? 'owner' : 'member',
+        role: member.role === 'owner' ? 'owner' : member.role === 'observer' ? 'observer' : 'developer',
       })),
     };
   }));
@@ -133,3 +170,4 @@ export async function createTeam(db, user, input) {
   ]);
   return readUpdatedTeam(db, user, teamId);
 }
+

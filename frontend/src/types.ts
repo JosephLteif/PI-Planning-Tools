@@ -41,7 +41,7 @@ export type TeamMember = {
   id: string;
   name: string;
   email: string;
-  role: 'owner' | 'member';
+  role: 'owner' | 'developer' | 'observer';
 };
 
 export type Team = {
@@ -171,3 +171,4 @@ export type RoomPayload = {
   room: Room;
   state: RoomState | null;
 };
+

@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
 import type { AdminUser } from '../types';
 import { initials } from '../state';
+import { AppIcon } from './AppIcon';
 
 type AdminPageProps = {
   users: AdminUser[];
@@ -85,8 +86,9 @@ export function AdminPage({ users, currentUserId, saving, onCreate, onUpdate, on
       </section>
       <section className="card admin-users-card">
         <div className="section-heading"><div><p className="section-kicker">Accounts</p><h2>Pointline users</h2></div><span className="section-count">{users.length}</span></div>
-        <div className="admin-user-list">{users.length ? users.map((account) => <div className="admin-user-row" key={account.id}><span className="avatar small-avatar">{initials(account.name || account.username || 'P')}</span><span><strong>{account.name}</strong><small>@{account.username || 'legacy'} · {account.role === 'admin' ? 'Administrator' : 'Member'}</small></span><span className="member-role">{account.disabled ? 'Disabled' : 'Active'}</span><button className="outline-button admin-edit-button" type="button" onClick={() => startEdit(account)}>Edit</button>{account.id !== currentUserId ? <button className="story-action-button danger-action" type="button" disabled={saving} onClick={() => void remove(account)} aria-label={'Remove ' + account.name}>×</button> : null}</div>) : <p className="empty-manager">No accounts yet.</p>}</div>
+        <div className="admin-user-list">{users.length ? users.map((account) => <div className="admin-user-row" key={account.id}><span className="avatar small-avatar">{initials(account.name || account.username || 'P')}</span><span><strong>{account.name}</strong><small>@{account.username || 'legacy'} · {account.role === 'admin' ? 'Administrator' : 'Member'}</small></span><span className="member-role">{account.disabled ? 'Disabled' : 'Active'}</span><button className="outline-button admin-edit-button" type="button" onClick={() => startEdit(account)}>Edit</button>{account.id !== currentUserId ? <button className="story-action-button danger-action" type="button" disabled={saving} onClick={() => void remove(account)} aria-label={'Remove ' + account.name}><AppIcon name="trash" size={14} /></button> : null}</div>) : <p className="empty-manager">No accounts yet.</p>}</div>
       </section>
     </section>
   </div>;
 }
+

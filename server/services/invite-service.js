@@ -59,7 +59,7 @@ export async function acceptInvite(db, user, token) {
   if (invite.kind === 'team') {
     await assertSingleTeamMembership(db, user.id, invite.team.id);
     statements.push(db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
-      VALUES (?, ?, 'member', ?) ON CONFLICT DO NOTHING`)
+      VALUES (?, ?, 'developer', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.team.id, user.id, now));
   } else if (invite.kind === 'room-team') {
     statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
@@ -77,3 +77,4 @@ export async function acceptInvite(db, user, token) {
   if (invite.room?.id) await publishRoomState(db, invite.room.id);
   return { invite, roomId: invite.room?.id || null, teamId: invite.team?.id || null };
 }
+

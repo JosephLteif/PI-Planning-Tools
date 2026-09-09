@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import type { RoomState } from '../types';
 import { cloneState } from '../state';
+import { AppIcon } from './AppIcon';
 
 type ResourcesPageProps = { state: RoomState; saving: boolean; readOnly?: boolean; onSave: (state: RoomState) => Promise<void> };
 type ResourceTab = 'service' | 'domain' | 'epic';
@@ -204,7 +205,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                     <div className="epic-resource-heading">
                       <div className="epic-resource-title">
                         <button className="epic-resource-toggle" type="button" aria-expanded={expanded} onClick={() => toggleEpic(row.id)}>
-                          <span className="epic-resource-chevron" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+                          <span className="epic-resource-chevron" aria-hidden="true"><AppIcon name={expanded ? 'chevronDown' : 'chevronRight'} size={14} /></span>
                           <span>
                             <span className="section-kicker">Epic</span>
                             <h3>{row.name}</h3>
@@ -282,15 +283,16 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
           <div className="service-manager-column">
             <div className="manager-heading"><div><strong>Domains</strong><span>{state.domains.length} configured</span></div></div>
             <form className="manager-form" onSubmit={(event) => void addDomain(event)}><input className="modal-input" value={domainName} onChange={(event) => setDomainName(event.target.value)} maxLength={80} placeholder="Platform" aria-label="Domain name" required disabled={readOnly} /><button className="primary-button" type="submit" disabled={saving || readOnly}>Add</button></form>
-            <div className="manager-list">{state.domains.length ? state.domains.map((domain) => <div className="manager-row" key={domain.id}><span className="manager-dot" /><span><strong>{domain.name}</strong></span><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeDomain(domain.id)} aria-label={`Remove ${domain.name}`}>×</button></div>) : <p className="empty-manager">No domains yet.</p>}</div>
+            <div className="manager-list">{state.domains.length ? state.domains.map((domain) => <div className="manager-row" key={domain.id}><span className="manager-dot" /><span><strong>{domain.name}</strong></span><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeDomain(domain.id)} aria-label={`Remove ${domain.name}`}><AppIcon name="x" size={14} /></button></div>) : <p className="empty-manager">No domains yet.</p>}</div>
           </div>
           <div className="service-manager-column">
             <div className="manager-heading"><div><strong>Services</strong><span>{state.services.length} configured</span></div></div>
             <form className="manager-form manager-service-form" onSubmit={(event) => void addService(event)}><input className="modal-input" value={serviceName} onChange={(event) => setServiceName(event.target.value)} maxLength={80} placeholder="Core API" aria-label="Service name" required disabled={readOnly} /><select className="modal-input" value={serviceDomain} onChange={(event) => setServiceDomain(event.target.value)} aria-label="Service domain" disabled={readOnly}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="primary-button" type="submit" disabled={saving || readOnly}>Add</button></form>
-            <div className="manager-list">{state.services.length ? state.services.map((service) => <div className="manager-row manager-service-row" key={service.id}><span><strong>{service.name}</strong><small>{state.domains.find((domain) => domain.id === service.domainId)?.name || 'No domain'}</small></span><select className="manager-domain-select" value={service.domainId} onChange={(event) => void updateServiceDomain(service.id, event.target.value)} aria-label={`Domain for ${service.name}`} disabled={readOnly}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeService(service.id)} aria-label={`Remove ${service.name}`}>×</button></div>) : <p className="empty-manager">No services yet.</p>}</div>
+            <div className="manager-list">{state.services.length ? state.services.map((service) => <div className="manager-row manager-service-row" key={service.id}><span><strong>{service.name}</strong><small>{state.domains.find((domain) => domain.id === service.domainId)?.name || 'No domain'}</small></span><select className="manager-domain-select" value={service.domainId} onChange={(event) => void updateServiceDomain(service.id, event.target.value)} aria-label={`Domain for ${service.name}`} disabled={readOnly}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeService(service.id)} aria-label={`Remove ${service.name}`}><AppIcon name="x" size={14} /></button></div>) : <p className="empty-manager">No services yet.</p>}</div>
           </div>
         </div>
       </section>
     </div>
   );
 }
+

@@ -141,6 +141,7 @@ button {
 }
 
 .room-selector {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -155,6 +156,20 @@ button {
 
 .room-selector:hover {
   background: rgba(255, 255, 255, 0.11);
+}
+
+.room-selector-control {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.room-selector-chevron {
+  flex: 0 0 auto;
+  color: #8190a6;
 }
 
 .room-dot {
@@ -343,6 +358,19 @@ button {
   margin-top: 2px;
   color: #8392a8;
   font-size: 10px;
+}
+
+.sidebar-user-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.sidebar-user-actions .icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 .main-area {
@@ -1152,10 +1180,12 @@ h1 {
 .story-queues {
   display: grid;
   gap: 10px;
-  height: 560px;
+  min-height: 160px;
+  max-height: min(68vh, 760px);
   overflow-y: auto;
   padding: 9px;
   align-content: start;
+  scrollbar-gutter: stable;
 }
 
 .story-queue-group {
@@ -3664,13 +3694,13 @@ h1 {
 }
 
 .app-shell.sidebar-collapsed {
-  grid-template-columns: 70px minmax(0, 1fr);
+  grid-template-columns: 78px minmax(0, 1fr);
 }
 
 .app-shell.sidebar-collapsed .sidebar {
   align-items: center;
-  padding-right: 6px;
-  padding-left: 6px;
+  padding: 20px 9px 15px;
+  background: linear-gradient(180deg, #101d31 0%, #0c1728 100%);
 }
 
 .app-shell.sidebar-collapsed .sidebar-brand-row {
@@ -3683,11 +3713,18 @@ h1 {
   padding: 0;
 }
 
+.app-shell.sidebar-collapsed .brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  font-size: 19px;
+}
+
 .app-shell.sidebar-collapsed .brand-text,
 .app-shell.sidebar-collapsed .sidebar-kicker,
 .app-shell.sidebar-collapsed .room-context-label,
 .app-shell.sidebar-collapsed .room-selector-copy,
-.app-shell.sidebar-collapsed .room-selector > svg,
+.app-shell.sidebar-collapsed .room-selector-chevron,
 .app-shell.sidebar-collapsed .room-selector-action,
 .app-shell.sidebar-collapsed .nav-link-label,
 .app-shell.sidebar-collapsed .nav-count,
@@ -3697,34 +3734,72 @@ h1 {
 }
 
 .app-shell.sidebar-collapsed .room-context {
-  width: 40px;
+  width: 52px;
 }
 
 .app-shell.sidebar-collapsed .room-selector {
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-top: 35px;
+  width: 52px;
+  height: 48px;
+  margin-top: 29px;
   padding: 0;
+  border-color: rgba(223, 240, 107, 0.24);
+  border-radius: 13px;
 }
 
 .app-shell.sidebar-collapsed .sidebar-nav {
   width: 100%;
-  margin-top: 22px;
+  margin-top: 18px;
 }
 
 .app-shell.sidebar-collapsed .nav-link {
+  width: 52px;
+  height: 46px;
   justify-content: center;
-  padding: 12px 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 13px;
+}
+
+.app-shell.sidebar-collapsed .nav-link:hover,
+.app-shell.sidebar-collapsed .nav-link.active {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.app-shell.sidebar-collapsed .nav-link.active {
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.16), inset 0 0 0 1px rgba(223, 240, 107, 0.12);
+}
+
+.app-shell.sidebar-collapsed .sidebar-general-nav {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top-color: rgba(255, 255, 255, 0.1);
 }
 
 .app-shell.sidebar-collapsed .sidebar-user {
-  padding: 15px 0 0;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 15px;
+  padding: 14px 0 0;
+}
+
+.app-shell.sidebar-collapsed .sidebar-user-actions {
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 0;
+}
+
+.app-shell.sidebar-collapsed .sidebar-user-actions .icon-button {
+  width: 34px;
+  height: 30px;
 }
 
 @media (max-width: 900px) {
   .app-shell {
-    grid-template-columns: 70px minmax(0, 1fr);
+    grid-template-columns: 78px minmax(0, 1fr);
   }
 
   .sidebar {
@@ -3751,7 +3826,7 @@ h1 {
   .room-context-label,
   .sidebar-nav-heading,
   .room-selector-copy,
-  .room-selector > svg,
+  .room-selector-chevron,
   .room-selector-action,
   .nav-link-label,
   .nav-count,
@@ -3762,14 +3837,14 @@ h1 {
 
   .room-selector {
     justify-content: center;
-    width: 40px;
-    height: 40px;
-    margin-top: 35px;
+    width: 52px;
+    height: 48px;
+    margin-top: 29px;
     padding: 0;
   }
 
   .room-context {
-    width: 40px;
+    width: 52px;
   }
 
   .sidebar-nav {
@@ -3785,8 +3860,10 @@ h1 {
   }
 
   .nav-link {
+    width: 52px;
+    height: 46px;
     justify-content: center;
-    padding: 12px 0;
+    padding: 0;
   }
 
   .nav-link.active {
@@ -3808,6 +3885,10 @@ h1 {
 
   .story-list {
     grid-template-columns: 1fr;
+  }
+
+  .story-queues {
+    max-height: min(58vh, 520px);
   }
 
   .modal-backdrop {
@@ -5538,7 +5619,7 @@ html[data-theme='dark'] .history-detail {
   }
 
   .story-queues {
-    height: 420px;
+    max-height: min(58vh, 520px);
   }
 
   .story-score-item small {
@@ -5560,3 +5641,4 @@ html[data-theme='dark'] .history-detail {
     justify-content: center;
   }
 }
+

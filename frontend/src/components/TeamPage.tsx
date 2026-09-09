@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { Team, User } from '../types';
+import { AppIcon } from './AppIcon';
 
 type TeamPageProps = {
   teams: Team[];
@@ -8,12 +9,13 @@ type TeamPageProps = {
   canManage: boolean;
   onCreate: (name: string) => Promise<void>;
   onAddMember: (teamId: string, accountId: string) => Promise<void>;
+  onUpdateMemberRole: (teamId: string, accountId: string, role: 'developer' | 'observer') => Promise<void>;
   onDelete: (teamId: string) => Promise<void>;
   onRemoveMember: (teamId: string, accountId: string) => Promise<void>;
   onPromoteOwner: (teamId: string, accountId: string) => Promise<void>;
 };
 
-export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, onAddMember, onDelete, onRemoveMember, onPromoteOwner }: TeamPageProps) {
+export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, onAddMember, onUpdateMemberRole, onDelete, onRemoveMember, onPromoteOwner }: TeamPageProps) {
   const [name, setName] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState(teams[0]?.id || '');
   const [memberId, setMemberId] = useState('');
@@ -59,9 +61,14 @@ export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, o
     await onRemoveMember(selectedTeam.id, accountId);
   }
 
+  async function updateRole(accountId: string, role: 'developer' | 'observer') {
+    if (!selectedTeam) return;
+    await onUpdateMemberRole(selectedTeam.id, accountId, role);
+  }
+
   return (
     <div className="management-content">
-      <div className="hero-row"><div><p className="eyebrow">Workspace</p><h1>Bring the right people in.</h1><p className="hero-copy">Teams are workspace-wide groups. Add people here, then invite a person or team into a specific room from the Rooms page.</p></div></div>
+      <div className="hero-row"><div><p className="eyebrow">Workspace</p><h1>Bring the right people in.</h1><p className="hero-copy">Teams are workspace-wide groups. Add people here, set each person as a Developer or Observer, then invite a person or team into a room.</p></div></div>
       <div className="pl-management-grid">
         <section className="card pl-form-card">
           <span className="story-progress">New team</span>
@@ -90,15 +97,24 @@ export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, o
               <option value="">{availableUsers.length ? 'Add an existing account…' : 'No unassigned accounts available'}</option>
               {availableUsers.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name || candidate.username || candidate.email || candidate.id}</option>)}
             </select>
-            <button className="primary-button" type="button" disabled={saving || !memberId} onClick={() => void addMember()}>Add member</button>
+            <button className="primary-button" type="button" disabled={saving || !memberId} onClick={() => void addMember()}><AppIcon name="userPlus" size={14} /> Add member</button>
           </div>
-          <p className="modal-hint">Each person can belong to one workspace team at a time.</p>
+          <p className="modal-hint">Each person can belong to one workspace team at a time. Their role applies to every room where they participate through this team.</p>
         </> : null}
         <div className="pl-member-grid">
           {selectedTeam.members.map((member) => <div className="pl-member-row" key={member.id}>
             <span className="avatar small-avatar">{member.name.slice(0, 1).toUpperCase()}</span>
             <span><strong>{member.name}</strong><small>{member.email}</small></span>
-            <span className="member-role">{member.role === 'owner' ? 'Owner' : 'Member'}</span>
+            {member.role === 'owner' ? <span className="member-role">Owner</span> : canManageSelectedTeam ? <select
+              className="modal-input team-member-role-select"
+              value={member.role === 'observer' ? 'observer' : 'developer'}
+              disabled={saving}
+              onChange={(event) => void updateRole(member.id, event.target.value as 'developer' | 'observer')}
+              aria-label={`Role for ${member.name}`}
+            >
+              <option value="developer">Developer</option>
+              <option value="observer">Observer</option>
+            </select> : <span className="member-role">{member.role === 'observer' ? 'Observer' : 'Developer'}</span>}
             {canManageSelectedTeam && member.role !== 'owner' ? <div className="pl-member-actions">
               <button className="outline-button" type="button" disabled={saving} onClick={() => void promoteMember(member.id, member.name)}>Make owner</button>
               <button className="outline-button danger-outline" type="button" disabled={saving} onClick={() => void removeMember(member.id, member.name)}>Remove</button>
@@ -109,3 +125,4 @@ export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, o
     </div>
   );
 }
+
