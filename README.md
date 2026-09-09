@@ -63,4 +63,4 @@ The Admin page can export a versioned JSON backup containing accounts, rooms, ro
 
 Build and run the Node service with the included Dockerfile or with `npm start`. The server listens on `0.0.0.0` and honors the hosting platform's `PORT` value.
 
-For a low-resource public test deployment, [render.yaml](render.yaml) defines a free Render Docker web service and a managed PostgreSQL database. The Blueprint injects the database connection string into the web service so application data survives web-service restarts.
+For a low-resource public test deployment, [render.yaml](render.yaml) defines a free Render Docker web service. Set its `DATABASE_URL` secret to the Supabase PostgreSQL session-pooler connection string; application data then lives outside the Render web-service filesystem and survives web-service restarts.
