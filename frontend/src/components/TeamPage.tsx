@@ -68,7 +68,7 @@ export function TeamPage({ teams, directoryUsers, saving, canManage, onCreate, o
           <h2>Create a team</h2>
           <p>Start a reusable planning group for this workspace.</p>
           <form className="pl-form" onSubmit={(event) => void submit(event)}>
-            <label className="modal-field"><span>Team name</span><input className="modal-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Commerce planning" required /></label>
+            <label className="modal-field"><span>Team name</span><input className="modal-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Platform planning" required /></label>
             <button className="primary-button" type="submit" disabled={saving}>Create team</button>
           </form>
         </section>
