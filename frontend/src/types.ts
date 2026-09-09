@@ -8,11 +8,13 @@ export type User = {
   role: Role;
 };
 
+export type RoomMemberRole = 'owner' | 'developer' | 'observer';
+
 export type RoomMember = {
   id: string;
   name: string;
   email: string;
-  role: 'owner' | 'member';
+  role: RoomMemberRole;
   teamId: string | null;
   teamName: string | null;
 };
@@ -105,7 +107,7 @@ export type Story = {
 export type RoundPlayer = {
   id: string;
   name: string;
-  role: 'owner' | 'member';
+  role: RoomMemberRole;
   joined: boolean;
   hasVoted: boolean;
   manualSubmitted: boolean;

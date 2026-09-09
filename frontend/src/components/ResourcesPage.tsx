@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import type { RoomState } from '../types';
 import { cloneState } from '../state';
 
-type ResourcesPageProps = { state: RoomState; saving: boolean; onSave: (state: RoomState) => Promise<void> };
+type ResourcesPageProps = { state: RoomState; saving: boolean; readOnly?: boolean; onSave: (state: RoomState) => Promise<void> };
 type ResourceTab = 'service' | 'domain' | 'epic';
 type EstimateSource = 'team' | 'ai';
 type EpicResourceRow = {
@@ -91,7 +91,7 @@ function entityId(prefix: string, ids: string[]) {
   return id;
 }
 
-export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
+export function ResourcesPage({ state, saving, readOnly = false, onSave }: ResourcesPageProps) {
   const [tab, setTab] = useState<ResourceTab>('service');
   const [estimateSource, setEstimateSource] = useState<EstimateSource>('team');
   const [expandedEpics, setExpandedEpics] = useState<Record<string, boolean>>({});
@@ -105,6 +105,7 @@ export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
 
   async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (readOnly) return;
     const name = domainName.trim();
     if (!name || state.domains.some((domain) => domain.name.toLowerCase() === name.toLowerCase())) return;
     const next = cloneState(state);
@@ -115,6 +116,7 @@ export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
 
   async function addService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (readOnly) return;
     const name = serviceName.trim();
     if (!name || state.services.some((service) => service.name.toLowerCase() === name.toLowerCase())) return;
     const next = cloneState(state);
@@ -124,12 +126,14 @@ export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
   }
 
   async function updateServiceDomain(serviceId: string, domainId: string) {
+    if (readOnly) return;
     const next = cloneState(state);
     next.services = next.services.map((service) => service.id === serviceId ? { ...service, domainId } : service);
     await onSave(next);
   }
 
   async function removeDomain(domainId: string) {
+    if (readOnly) return;
     const domain = state.domains.find((candidate) => candidate.id === domainId);
     if (!domain || !window.confirm(`Remove ${domain.name}? Its services will remain unassigned.`)) return;
     const next = cloneState(state);
@@ -139,6 +143,7 @@ export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
   }
 
   async function removeService(serviceId: string) {
+    if (readOnly) return;
     const service = state.services.find((candidate) => candidate.id === serviceId);
     if (!service || !window.confirm(`Remove ${service.name}? Story allocations to it will be cleared.`)) return;
     const next = cloneState(state);
@@ -269,19 +274,20 @@ export function ResourcesPage({ state, saving, onSave }: ResourcesPageProps) {
             <p className="section-kicker">Resource catalog</p>
             <h2>Manage domains and services</h2>
             <p>Keep ownership close to the stories. Removing a service clears its story allocations.</p>
+            {readOnly ? <p className="modal-hint">Observers can view resources but cannot change the catalog.</p> : null}
           </div>
           <span className="story-progress">{state.services.length} services</span>
         </div>
         <div className="service-manager-grid">
           <div className="service-manager-column">
             <div className="manager-heading"><div><strong>Domains</strong><span>{state.domains.length} configured</span></div></div>
-            <form className="manager-form" onSubmit={(event) => void addDomain(event)}><input className="modal-input" value={domainName} onChange={(event) => setDomainName(event.target.value)} maxLength={80} placeholder="Platform" aria-label="Domain name" required /><button className="primary-button" type="submit" disabled={saving}>Add</button></form>
-            <div className="manager-list">{state.domains.length ? state.domains.map((domain) => <div className="manager-row" key={domain.id}><span className="manager-dot" /><span><strong>{domain.name}</strong></span><button className="icon-button compact-icon" type="button" onClick={() => void removeDomain(domain.id)} aria-label={`Remove ${domain.name}`}>×</button></div>) : <p className="empty-manager">No domains yet.</p>}</div>
+            <form className="manager-form" onSubmit={(event) => void addDomain(event)}><input className="modal-input" value={domainName} onChange={(event) => setDomainName(event.target.value)} maxLength={80} placeholder="Platform" aria-label="Domain name" required disabled={readOnly} /><button className="primary-button" type="submit" disabled={saving || readOnly}>Add</button></form>
+            <div className="manager-list">{state.domains.length ? state.domains.map((domain) => <div className="manager-row" key={domain.id}><span className="manager-dot" /><span><strong>{domain.name}</strong></span><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeDomain(domain.id)} aria-label={`Remove ${domain.name}`}>×</button></div>) : <p className="empty-manager">No domains yet.</p>}</div>
           </div>
           <div className="service-manager-column">
             <div className="manager-heading"><div><strong>Services</strong><span>{state.services.length} configured</span></div></div>
-            <form className="manager-form manager-service-form" onSubmit={(event) => void addService(event)}><input className="modal-input" value={serviceName} onChange={(event) => setServiceName(event.target.value)} maxLength={80} placeholder="Core API" aria-label="Service name" required /><select className="modal-input" value={serviceDomain} onChange={(event) => setServiceDomain(event.target.value)} aria-label="Service domain"><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="primary-button" type="submit" disabled={saving}>Add</button></form>
-            <div className="manager-list">{state.services.length ? state.services.map((service) => <div className="manager-row manager-service-row" key={service.id}><span><strong>{service.name}</strong><small>{state.domains.find((domain) => domain.id === service.domainId)?.name || 'No domain'}</small></span><select className="manager-domain-select" value={service.domainId} onChange={(event) => void updateServiceDomain(service.id, event.target.value)} aria-label={`Domain for ${service.name}`}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="icon-button compact-icon" type="button" onClick={() => void removeService(service.id)} aria-label={`Remove ${service.name}`}>×</button></div>) : <p className="empty-manager">No services yet.</p>}</div>
+            <form className="manager-form manager-service-form" onSubmit={(event) => void addService(event)}><input className="modal-input" value={serviceName} onChange={(event) => setServiceName(event.target.value)} maxLength={80} placeholder="Core API" aria-label="Service name" required disabled={readOnly} /><select className="modal-input" value={serviceDomain} onChange={(event) => setServiceDomain(event.target.value)} aria-label="Service domain" disabled={readOnly}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="primary-button" type="submit" disabled={saving || readOnly}>Add</button></form>
+            <div className="manager-list">{state.services.length ? state.services.map((service) => <div className="manager-row manager-service-row" key={service.id}><span><strong>{service.name}</strong><small>{state.domains.find((domain) => domain.id === service.domainId)?.name || 'No domain'}</small></span><select className="manager-domain-select" value={service.domainId} onChange={(event) => void updateServiceDomain(service.id, event.target.value)} aria-label={`Domain for ${service.name}`} disabled={readOnly}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeService(service.id)} aria-label={`Remove ${service.name}`}>×</button></div>) : <p className="empty-manager">No services yet.</p>}</div>
           </div>
         </div>
       </section>

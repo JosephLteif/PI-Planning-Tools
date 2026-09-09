@@ -4,6 +4,7 @@ export const DEFAULT_PI_LABEL = 'PI 71';
 export const ALLOWED_SEQUENCES = new Set(['sequential', 'fibonacci', 'modified']);
 export const ALLOWED_PHASES = new Set(['idle', 'voting', 'revealed']);
 export const ALLOWED_INVITE_KINDS = new Set(['room-person', 'room-team', 'team']);
+export const ROOM_MEMBER_ROLES = new Set(['developer', 'observer']);
 export const ROOM_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 export const USERNAME_PATTERN = /^[a-z][a-z0-9._-]{2,39}$/;
 export const SESSION_COOKIE = 'pointline_session';
@@ -40,6 +41,10 @@ export function accountUser(account) {
     email: account.email || '',
     role: account.role === 'admin' ? 'admin' : 'member',
   };
+}
+
+export function roomMemberRole(value) {
+  return value === 'observer' ? 'observer' : value === 'owner' ? 'owner' : 'developer';
 }
 
 export function normalizeUsername(value) {

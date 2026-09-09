@@ -63,14 +63,14 @@ export async function acceptInvite(db, user, token) {
       .bind(invite.team.id, user.id, now));
   } else if (invite.kind === 'room-team') {
     statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-      SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ? ON CONFLICT DO NOTHING`)
+      SELECT ?, account_id, 'developer', ? FROM team_members WHERE team_id = ? ON CONFLICT DO NOTHING`)
       .bind(invite.room.id, now, invite.team.id));
     statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
+      VALUES (?, ?, 'developer', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.room.id, user.id, now));
   } else {
     statements.push(db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
+      VALUES (?, ?, 'developer', ?) ON CONFLICT DO NOTHING`)
       .bind(invite.room.id, user.id, now));
   }
   await db.batch(statements);

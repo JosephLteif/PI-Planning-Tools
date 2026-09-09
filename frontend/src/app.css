@@ -86,6 +86,8 @@ html[data-theme='dark'] .allocation-estimate-option.active { background: var(--s
 .room-access-row > span:first-child { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .room-access-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .room-access-row small { color: var(--ink-soft); font-size: 9px; }
+.room-member-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.room-member-role-select { min-width: 98px; padding: 7px 8px; font-size: 10px; }
 .room-remove-button { flex: 0 0 auto; padding: 7px 9px; font-size: 10px; }
 .room-add-controls { margin-top: 18px; }
 .room-invite-controls { margin-top: 10px; }

@@ -189,6 +189,13 @@ export function removeRoomMember(roomId: string, accountId: string) {
   }).then(normalizeRoomPayload);
 }
 
+export function updateRoomMemberRole(roomId: string, accountId: string, role: 'developer' | 'observer') {
+  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(accountId)}`, {
+    method: 'PATCH',
+    body: { role },
+  }).then(normalizeRoomPayload);
+}
+
 export function removeRoomTeam(roomId: string, teamId: string) {
   return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/teams/${encodeURIComponent(teamId)}`, {
     method: 'DELETE',

@@ -45,7 +45,7 @@ export const rooms = pgTable('rooms', {
 export const roomMembers = pgTable('room_members', {
   roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
   accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
-  role: text('role').notNull().default('editor'),
+  role: text('role').notNull().default('developer'),
   createdAt: text('created_at').notNull(),
 }, (table) => ({
   roomMembersPk: primaryKey({ columns: [table.roomId, table.accountId] }),

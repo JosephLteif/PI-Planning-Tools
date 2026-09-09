@@ -34,6 +34,7 @@ import {
   readRoomState,
   readRooms,
   saveRoomState,
+  updateRoomMember,
   updateRoom,
 } from '../services/room-service.js';
 import { acceptInvite, createInvite, readInvite } from '../services/invite-service.js';
@@ -123,6 +124,14 @@ export async function handleApiRequest(request, env) {
     const targetRoomId = decodeURIComponent(roomMemberAccountPathMatch[1]);
     const accountId = decodeURIComponent(roomMemberAccountPathMatch[2]);
     const room = await removeRoomMember(env.DB, user, targetRoomId, accountId);
+    await publishRoomState(env.DB, targetRoomId);
+    return json({ ok: true, roomId: targetRoomId, ...room });
+  }
+
+  if (roomMemberAccountPathMatch && (request.method === 'PUT' || request.method === 'PATCH')) {
+    const targetRoomId = decodeURIComponent(roomMemberAccountPathMatch[1]);
+    const accountId = decodeURIComponent(roomMemberAccountPathMatch[2]);
+    const room = await updateRoomMember(env.DB, user, targetRoomId, accountId, await readJson(request));
     await publishRoomState(env.DB, targetRoomId);
     return json({ ok: true, roomId: targetRoomId, ...room });
   }
@@ -223,6 +232,11 @@ export async function handleApiRequest(request, env) {
     const storyId = cleanId(input.storyId);
     const roundNumber = Number(input.roundNumber);
     const targetAccountId = cleanId(input.accountId) || user.id;
+    const targetMember = await env.DB.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+      .bind(roomId, targetAccountId).first();
+    if (targetMember?.role === 'observer') {
+      return json({ error: 'Observers can view this room but cannot join voting rounds' }, 403);
+    }
     if (targetAccountId !== user.id && !(await canManageRoom(env.DB, roomId, user))) {
       throw authError('Only the room owner or an admin can remove another voter', 403);
     }
@@ -270,6 +284,11 @@ export async function handleApiRequest(request, env) {
     const input = await readJson(request);
     const storyId = cleanId(input.storyId);
     const roundNumber = Number(input.roundNumber);
+    const member = await env.DB.prepare('SELECT role FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+      .bind(roomId, user.id).first();
+    if (member?.role === 'observer') {
+      return json({ error: 'Observers can view this room but cannot submit votes' }, 403);
+    }
     const round = await env.DB.prepare(`SELECT phase FROM planning_rounds
       WHERE room_id = ? AND story_key = ? AND round_number = ? LIMIT 1`)
       .bind(roomId, storyId, roundNumber)
@@ -304,7 +323,8 @@ export async function handleApiRequest(request, env) {
     const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM votes v
       JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
         AND p.round_number = v.round_number AND p.account_id = v.account_id
-      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?`).bind(roomId, storyId, roundNumber).first();
+      JOIN room_members rm ON rm.room_id = v.room_id AND rm.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ? AND rm.role <> 'observer'`).bind(roomId, storyId, roundNumber).first();
     await publishRoomState(env.DB, roomId);
     return json({ ok: true, submittedCount: Number(count?.count) || 0 });
   }

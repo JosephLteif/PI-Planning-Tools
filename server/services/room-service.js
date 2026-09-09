@@ -4,6 +4,7 @@ import {
   ROOM_ID_PATTERN,
   ROOM_SOCKETS,
   ROOM_STREAMS,
+  ROOM_MEMBER_ROLES,
   authError,
   cleanId,
   cleanStoryUrl,
@@ -14,6 +15,7 @@ import {
   parseAcceptance,
   parseScore,
   rows,
+  roomMemberRole,
   streamEvent,
 } from './common.js';
 import { canManageRoom, requireRoomManager, requireTeamMember } from './access-service.js';
@@ -28,7 +30,7 @@ export async function addRoomMembers(db, user, roomId, input) {
     if (user.role !== 'admin') await requireTeamMember(db, teamId, user.id);
     await db.batch([
       db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-        SELECT ?, account_id, 'editor', ? FROM team_members WHERE team_id = ? ON CONFLICT DO NOTHING`)
+        SELECT ?, account_id, 'developer', ? FROM team_members WHERE team_id = ? ON CONFLICT DO NOTHING`)
         .bind(roomId, now, teamId),
       db.prepare('UPDATE rooms SET state_version = state_version + 1, updated_at = ? WHERE id = ?')
         .bind(now, roomId),
@@ -38,7 +40,7 @@ export async function addRoomMembers(db, user, roomId, input) {
     if (!account) throw authError('Member not found', 404);
     await db.batch([
       db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-        VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`).bind(roomId, accountId, now),
+        VALUES (?, ?, 'developer', ?) ON CONFLICT DO NOTHING`).bind(roomId, accountId, now),
       db.prepare('UPDATE rooms SET state_version = state_version + 1, updated_at = ? WHERE id = ?')
         .bind(now, roomId),
     ]);
@@ -70,7 +72,9 @@ export async function readRoomState(db, roomId, userId) {
     db.prepare(`SELECT rm.account_id, rm.role, a.display_name, a.email
       FROM room_members rm LEFT JOIN accounts a ON a.id = rm.account_id
       WHERE rm.room_id = ? ORDER BY rm.role DESC, a.display_name, a.email`).bind(roomId).all(),
-    db.prepare('SELECT account_id FROM room_voting_members WHERE room_id = ?').bind(roomId).all(),
+    db.prepare(`SELECT rvm.account_id FROM room_voting_members rvm
+      JOIN room_members rm ON rm.room_id = rvm.room_id AND rm.account_id = rvm.account_id
+      WHERE rvm.room_id = ? AND rm.role <> 'observer'`).bind(roomId).all(),
     db.prepare(`SELECT t.id AS team_id, t.name AS team_name, tm.account_id
       FROM team_members tm
       JOIN teams t ON t.id = tm.team_id
@@ -128,7 +132,7 @@ export async function readRoomState(db, roomId, userId) {
       id: member.account_id,
       name: member.display_name || member.email?.split('@')[0] || 'Planner',
       email: member.email || '',
-      role: member.role === 'owner' ? 'owner' : 'member',
+      role: roomMemberRole(member.role),
       teamId: team?.id || null,
       teamName: team?.name || null,
     };
@@ -138,6 +142,7 @@ export async function readRoomState(db, roomId, userId) {
     ? room.selected_story_key
     : stories[0]?.id || null;
   const votingMemberIds = new Set(rows(votingMemberResult).map((member) => member.account_id));
+  const eligibleRoomMemberIds = new Set(roomMembers.filter((member) => member.role !== 'observer').map((member) => member.id));
   let currentRound = null;
   if (selectedStoryId) {
     currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at, timer_started_at
@@ -179,11 +184,12 @@ export async function readRoomState(db, roomId, userId) {
       .bind(roomId, round.storyId, round.roundNumber)
       .all();
     const participantIds = new Set(rows(participantResult).map((participant) => participant.account_id));
-    const activeParticipantIds = new Set([...votingMemberIds, ...participantIds]);
+    const activeParticipantIds = new Set([...votingMemberIds, ...participantIds].filter((accountId) => eligibleRoomMemberIds.has(accountId)));
     const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM votes v
       JOIN planning_round_participants p ON p.room_id = v.room_id AND p.story_key = v.story_key
         AND p.round_number = v.round_number AND p.account_id = v.account_id
-      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?`)
+      JOIN room_members rm ON rm.room_id = v.room_id AND rm.account_id = v.account_id
+      WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ? AND rm.role <> 'observer'`)
       .bind(roomId, round.storyId, round.roundNumber)
       .first();
     round.submittedCount = Number(countRow?.count) || 0;
@@ -253,7 +259,9 @@ export async function readRoomState(db, roomId, userId) {
   } catch {
     storedCapacity = {};
   }
-  const capacityRoster = roomMembers.map((member) => ({ id: member.id, name: member.name }));
+  const capacityRoster = roomMembers
+    .filter((member) => member.role !== 'observer')
+    .map((member) => ({ id: member.id, name: member.name }));
   const capacity = normalizeCapacity(storedCapacity, capacityRoster);
 
   return {
@@ -468,13 +476,20 @@ export async function saveRoomState(db, roomId, input, user) {
     error.status = 404;
     throw error;
   }
-  const memberRosterResult = await db.prepare(`SELECT rm.account_id, a.display_name, a.email
+  const memberRosterResult = await db.prepare(`SELECT rm.account_id, rm.role, a.display_name, a.email
     FROM room_members rm LEFT JOIN accounts a ON a.id = rm.account_id
     WHERE rm.room_id = ?`).bind(roomId).all();
-  const capacityRoster = rows(memberRosterResult).map((member) => ({
-    id: member.account_id,
-    name: member.display_name || member.email?.split('@')[0] || 'Planner',
-  }));
+  const memberRows = rows(memberRosterResult);
+  const currentMember = memberRows.find((member) => member.account_id === user.id);
+  if (user.role !== 'admin' && currentMember?.role === 'observer') {
+    throw authError('Observers have view-only access to this room', 403);
+  }
+  const capacityRoster = memberRows
+    .filter((member) => member.role !== 'observer')
+    .map((member) => ({
+      id: member.account_id,
+      name: member.display_name || member.email?.split('@')[0] || 'Planner',
+    }));
   const source = normalizeStateInput(input, capacityRoster);
   if (!source.stories.length) {
     const error = new Error('At least one story is required');
@@ -586,12 +601,43 @@ export async function saveRoomState(db, roomId, input, user) {
     if (source.round.phase === 'voting') {
       statements.push(db.prepare(`INSERT INTO planning_round_participants
         (room_id, story_key, round_number, account_id, joined_at)
-        SELECT room_id, ?, ?, account_id, joined_at FROM room_voting_members WHERE room_id = ? ON CONFLICT DO NOTHING`)
+        SELECT rvm.room_id, ?, ?, rvm.account_id, rvm.joined_at
+        FROM room_voting_members rvm
+        JOIN room_members rm ON rm.room_id = rvm.room_id AND rm.account_id = rvm.account_id
+        WHERE rvm.room_id = ? AND rm.role <> 'observer' ON CONFLICT DO NOTHING`)
         .bind(source.round.storyId, source.round.roundNumber, roomId));
     }
   }
 
   await runBatches(db, statements);
+}
+
+export async function updateRoomMember(db, user, roomId, accountId, input) {
+  if (!roomId || !ROOM_ID_PATTERN.test(roomId)) throw authError('The room is invalid', 400);
+  const targetAccountId = cleanId(accountId);
+  const role = cleanText(input?.role, '', 20);
+  if (!targetAccountId) throw authError('The member is invalid', 400);
+  if (!ROOM_MEMBER_ROLES.has(role)) throw authError('Choose Developer or Observer', 400);
+  await requireRoomManager(db, roomId, user);
+  const room = await db.prepare('SELECT owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  const member = await db.prepare('SELECT account_id FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1')
+    .bind(roomId, targetAccountId).first();
+  if (!member) throw authError('Room member not found', 404);
+  if (room?.owner_account_id === targetAccountId) throw authError('Transfer room ownership before changing the owner role', 409);
+  const now = new Date().toISOString();
+  const statements = [
+    db.prepare('UPDATE room_members SET role = ? WHERE room_id = ? AND account_id = ?').bind(role, roomId, targetAccountId),
+    db.prepare('UPDATE rooms SET state_version = state_version + 1, updated_at = ? WHERE id = ?').bind(now, roomId),
+  ];
+  if (role === 'observer') {
+    statements.push(
+      db.prepare('DELETE FROM votes WHERE room_id = ? AND account_id = ?').bind(roomId, targetAccountId),
+      db.prepare('DELETE FROM planning_round_participants WHERE room_id = ? AND account_id = ?').bind(roomId, targetAccountId),
+      db.prepare('DELETE FROM room_voting_members WHERE room_id = ? AND account_id = ?').bind(roomId, targetAccountId),
+    );
+  }
+  await db.batch(statements);
+  return readRoomState(db, roomId, user.id);
 }
 
 export async function createRoom(db, user, input) {

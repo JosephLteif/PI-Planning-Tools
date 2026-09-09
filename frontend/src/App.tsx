@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateRoomMemberRole } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
@@ -437,6 +437,21 @@ export default function App() {
     }
   }
 
+  async function handleUpdateRoomMemberRole(accountId: string, role: 'developer' | 'observer') {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try {
+      const payload = await updateRoomMemberRole(selectedRoomId, accountId, role);
+      setRoomPayload(payload);
+      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
+      setNotice(role === 'observer' ? 'Member marked as observer' : 'Member marked as developer');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleRemoveRoomTeam(teamId: string) {
     if (!selectedRoomId) return;
     setSaving(true);
@@ -559,20 +574,21 @@ export default function App() {
 
   const room = roomPayload.room;
   const state = roomPayload.state;
+  const isObserver = room.members?.some((member) => member.id === user.id && member.role === 'observer') === true;
   const content = !state
-    ? <section className="card pl-placeholder"><div className="sidebar-tip-icon">▦</div><h2>This room is ready for its first story</h2><p>Initialize the room with a starter story, then invite the team into the first estimation round.</p><button className="primary-button" type="button" disabled={saving} onClick={() => void handleSave(defaultRoomState())}>Initialize room</button></section>
+    ? <section className="card pl-placeholder"><div className="sidebar-tip-icon">▦</div><h2>This room is ready for its first story</h2><p>Initialize the room with a starter story, then invite the team into the first estimation round.</p>{isObserver ? <p className="modal-hint">Observers can view the room once it has been initialized by a room manager.</p> : <button className="primary-button" type="button" disabled={saving} onClick={() => void handleSave(defaultRoomState())}>Initialize room</button>}</section>
     : view === 'estimates'
       ? <EstimatesPage room={room} state={state} user={user} saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
       : view === 'rooms'
-        ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
+        ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onUpdateMemberRole={handleUpdateRoomMemberRole} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
           ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
           : view === 'settings'
-            ? <SettingsPage state={state} saving={saving} onSave={handleSave} />
+            ? <SettingsPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
             : view === 'capacity'
-              ? <CapacityPage room={room} state={state} user={user} saving={saving} onSave={handleSave} />
+              ? <CapacityPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} />
               : view === 'resources'
-                ? <ResourcesPage state={state} saving={saving} onSave={handleSave} />
+                ? <ResourcesPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
                 : <AdminPage users={adminUsers} currentUserId={user.id} saving={saving} onCreate={handleCreateAdminUser} onUpdate={handleUpdateAdminUser} onDelete={handleDeleteAdminUser} onExport={handleExportBackup} onImport={handleImportBackup} />;
 
   return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSignOut={handleSignOut}>{content}</AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;

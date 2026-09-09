@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { CapacitySprint, Room, RoomState, User } from '../types';
-import { cloneState, displayName } from '../state';
+import { cloneState } from '../state';
 
-type CapacityPageProps = { room: Room; state: RoomState; user: User; saving: boolean; onSave: (state: RoomState) => Promise<void> };
+type CapacityPageProps = { room: Room; state: RoomState; user: User; saving: boolean; readOnly?: boolean; onSave: (state: RoomState) => Promise<void> };
 
 function businessDays(startDate: string, endDate: string): number {
   if (!startDate || !endDate) return 0;
@@ -40,17 +40,16 @@ function SprintEditorModal({ sprint, members, saving, onClose, onSave }: { sprin
   return <div className="modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="capacity-sprint-title"><div className="modal-header"><div><p className="section-kicker">Capacity plan</p><h2 id="capacity-sprint-title">Edit {sprint.name}</h2><p>Adjust dates, holidays, inclusion, and individual availability for this sprint.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close">×</button></div><form className="modal-form" onSubmit={(event) => { event.preventDefault(); void onSave(draft); }}><label className="modal-field"><span>Sprint name</span><input className="modal-input" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required /></label><div className="capacity-default-grid"><label className="modal-field"><span>Start date</span><input className="modal-input" type="date" value={draft.startDate} onChange={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))} required /></label><label className="modal-field"><span>End date</span><input className="modal-input" type="date" value={draft.endDate} onChange={(event) => setDraft((current) => ({ ...current, endDate: event.target.value }))} required /></label><label className="modal-field"><span>Beirut holidays</span><input className="modal-input" type="number" min="0" max="366" value={draft.holidayDaysBeirut} onChange={(event) => setDraft((current) => ({ ...current, holidayDaysBeirut: Math.max(0, Number(event.target.value) || 0) }))} /></label><label className="modal-field"><span>Cyprus holidays</span><input className="modal-input" type="number" min="0" max="366" value={draft.holidayDaysCyprus} onChange={(event) => setDraft((current) => ({ ...current, holidayDaysCyprus: Math.max(0, Number(event.target.value) || 0) }))} /></label></div><label className="room-setting-checkbox"><input type="checkbox" checked={draft.excludeFromTotal} onChange={(event) => setDraft((current) => ({ ...current, excludeFromTotal: event.target.checked }))} /> Do not count towards PI total</label>{members.length ? <div className="story-editor-services"><div className="modal-section-heading"><div><strong>Availability overrides</strong><span>Leave blank to use office weekdays after holidays.</span></div></div>{members.map((member) => <label className="modal-field" key={member.id}><span>{member.name} · available days</span><input className="modal-input" type="number" min="0" max="366" value={draft.availabilityDays[member.id] ?? ''} onChange={(event) => setDraft((current) => { const availabilityDays = { ...current.availabilityDays }; if (event.target.value === '') delete availabilityDays[member.id]; else availabilityDays[member.id] = Math.max(0, Number(event.target.value) || 0); return { ...current, availabilityDays }; })} placeholder="Use calculated weekdays" /></label>)}</div> : null}<div className="modal-footer"><button className="outline-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>Save sprint</button></div></form></section></div>;
 }
 
-export function CapacityPage({ room, state, user, saving, onSave }: CapacityPageProps) {
+export function CapacityPage({ room, state, user, saving, readOnly = false, onSave }: CapacityPageProps) {
   const [editingSprint, setEditingSprint] = useState<CapacitySprint | null>(null);
-  const canEdit = room.role === 'owner' || room.role === 'admin' || user.role === 'admin';
+  const canEdit = !readOnly && (room.role === 'owner' || room.role === 'admin' || user.role === 'admin');
   const capacity = state.capacity;
-  const members = capacity.members.length ? capacity.members : [{ id: user.id, name: displayName(user), office: 'beirut' as const, trainStaffDevCapacityPct: 0.75 }];
+  const members = capacity.members;
   const included = capacity.sprints.filter((sprint) => !sprint.excludeFromTotal);
   const total = included.reduce((sum, sprint) => sum + members.reduce((inner, member) => inner + sprintCapacity(member, sprint, capacity.defaults).total, 0), 0);
 
   function saveCapacity(update: (next: RoomState) => void) {
     const next = cloneState(state);
-    if (!next.capacity.members.length) next.capacity.members = members;
     update(next);
     void onSave(next);
   }

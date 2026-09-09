@@ -11,6 +11,7 @@ type RoomsPageProps = {
   onDelete: (room: Room) => Promise<void>;
   onUpdate: (name: string, piLabel: string) => Promise<void>;
   onRemoveMember: (accountId: string) => Promise<void>;
+  onUpdateMemberRole: (accountId: string, role: 'developer' | 'observer') => Promise<void>;
   onRemoveTeam: (teamId: string) => Promise<void>;
   directoryUsers: User[];
   teams: Team[];
@@ -29,6 +30,7 @@ export function RoomsPage({
   onDelete,
   onUpdate,
   onRemoveMember,
+  onUpdateMemberRole,
   onRemoveTeam,
   directoryUsers,
   teams,
@@ -51,6 +53,7 @@ export function RoomsPage({
   const roomMembers = selectedRoom?.members || [];
   const roomTeams = selectedRoom?.teams || [];
   const ownerTeamId = roomMembers.find((member) => member.role === 'owner')?.teamId;
+  const observerCount = roomMembers.filter((member) => member.role === 'observer').length;
 
   useEffect(() => {
     setRoomName(selectedRoom?.name || '');
@@ -213,13 +216,25 @@ export function RoomsPage({
 
             <section className="room-access-column">
               <div className="manager-heading">
-                <div><strong>Room members</strong><span>{roomMembers.length} current invitees</span></div>
+                <div><strong>Room members</strong><span>{roomMembers.length} current invitees · {roomMembers.length - observerCount} developers · {observerCount} observers</span></div>
               </div>
               <div className="manager-list">
                 {roomMembers.length ? roomMembers.map((member) => (
                   <div className="room-access-row" key={member.id}>
                     <span><strong>{member.name}</strong><small>{member.teamName ? `Included via ${member.teamName}` : member.email || 'Direct room invite'}</small></span>
-                    {member.role === 'owner' ? <span className="member-role">Owner</span> : <button className="outline-button danger-outline room-remove-button" type="button" disabled={saving} onClick={() => void removeMember(member.id, member.name)}>Remove</button>}
+                    <span className="room-member-actions">
+                      {member.role === 'owner' ? <span className="member-role">Owner</span> : <select
+                        className="modal-input room-member-role-select"
+                        value={member.role === 'observer' ? 'observer' : 'developer'}
+                        disabled={saving}
+                        onChange={(event) => void onUpdateMemberRole(member.id, event.target.value as 'developer' | 'observer')}
+                        aria-label={`Role for ${member.name}`}
+                      >
+                        <option value="developer">Developer</option>
+                        <option value="observer">Observer</option>
+                      </select>}
+                      {member.role === 'owner' ? null : <button className="outline-button danger-outline room-remove-button" type="button" disabled={saving} onClick={() => void removeMember(member.id, member.name)}>Remove</button>}
+                    </span>
                   </div>
                 )) : <p className="empty-manager">No members are currently included.</p>}
               </div>
