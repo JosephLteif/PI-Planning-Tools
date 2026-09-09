@@ -14,7 +14,6 @@ import {
 import {
   createManagedUser,
   deleteManagedUser,
-  ensureDefaultRoomMembership,
   login,
   logout,
   readAdminUsers,
@@ -29,10 +28,13 @@ import {
   createRoomWebSocket,
   createRoomStream,
   deleteRoom,
+  removeRoomMember,
+  removeRoomTeam,
   publishRoomState,
   readRoomState,
   readRooms,
   saveRoomState,
+  updateRoom,
 } from '../services/room-service.js';
 import { acceptInvite, createInvite, readInvite } from '../services/invite-service.js';
 import { exportBackup, importBackup } from '../services/backup-service.js';
@@ -68,11 +70,10 @@ export async function handleApiRequest(request, env) {
     return json(await importBackup(env.DB, await readJson(request, 50_000_000)));
   }
 
-  await ensureDefaultRoomMembership(env.DB, user);
   const roomId = roomIdFromRequest(request);
 
   if (url.pathname === '/api/teams' && request.method === 'GET') {
-    return json({ teams: await readTeams(env.DB, user.id) });
+    return json({ teams: await readTeams(env.DB, user.id, user.role === 'admin') });
   }
   if (url.pathname === '/api/teams' && request.method === 'POST') {
     const team = await createTeam(env.DB, user, await readJson(request));
@@ -114,7 +115,25 @@ export async function handleApiRequest(request, env) {
     const targetRoomId = decodeURIComponent(roomMemberPathMatch[1]);
     const room = await addRoomMembers(env.DB, user, targetRoomId, await readJson(request));
     await publishRoomState(env.DB, targetRoomId);
-    return json({ ok: true, roomId: targetRoomId, room: room.room, memberCount: room.memberCount });
+    return json({ ok: true, roomId: targetRoomId, ...room });
+  }
+
+  const roomMemberAccountPathMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/members\/([^/]+)$/);
+  if (roomMemberAccountPathMatch && request.method === 'DELETE') {
+    const targetRoomId = decodeURIComponent(roomMemberAccountPathMatch[1]);
+    const accountId = decodeURIComponent(roomMemberAccountPathMatch[2]);
+    const room = await removeRoomMember(env.DB, user, targetRoomId, accountId);
+    await publishRoomState(env.DB, targetRoomId);
+    return json({ ok: true, roomId: targetRoomId, ...room });
+  }
+
+  const roomTeamPathMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/teams\/([^/]+)$/);
+  if (roomTeamPathMatch && request.method === 'DELETE') {
+    const targetRoomId = decodeURIComponent(roomTeamPathMatch[1]);
+    const teamId = decodeURIComponent(roomTeamPathMatch[2]);
+    const room = await removeRoomTeam(env.DB, user, targetRoomId, teamId);
+    await publishRoomState(env.DB, targetRoomId);
+    return json({ ok: true, roomId: targetRoomId, ...room });
   }
 
   if (url.pathname === '/api/directory/users' && request.method === 'GET') {
@@ -128,6 +147,12 @@ export async function handleApiRequest(request, env) {
   }
 
   const roomPathMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
+  if (roomPathMatch && request.method === 'PUT') {
+    const targetRoomId = decodeURIComponent(roomPathMatch[1]);
+    const room = await updateRoom(env.DB, user, targetRoomId, await readJson(request));
+    await publishRoomState(env.DB, targetRoomId);
+    return json({ ok: true, roomId: targetRoomId, ...room });
+  }
   if (roomPathMatch && request.method === 'DELETE') {
     let targetRoomId = '';
     try {

@@ -47,11 +47,15 @@ function withRoom(path: string, roomId: string): string {
 }
 
 export function normalizeRoomPayload(payload: RoomPayload): RoomPayload {
+  const payloadMemberCount = Number(payload.memberCount);
+  const roomMemberCount = Number(payload.room.memberCount);
+  const memberCount = Number.isFinite(payloadMemberCount) ? payloadMemberCount : roomMemberCount;
   return {
     ...payload,
     room: {
       ...payload.room,
-      memberCount: Math.max(1, Number(payload.memberCount) || Number(payload.room.memberCount) || 1),
+      memberCount: Math.max(0, memberCount || 0),
+      teamCount: Math.max(0, Number(payload.room.teamCount) || 0),
     },
   };
 }
@@ -173,10 +177,29 @@ export function deleteTeam(teamId: string) {
 }
 
 export function addRoomMember(roomId: string, input: { accountId?: string; teamId?: string }) {
-  return request<{ ok: true; roomId: string; room: Room; memberCount: number }>(`/api/rooms/${encodeURIComponent(roomId)}/members`, {
+  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/members`, {
     method: 'POST',
     body: input,
-  });
+  }).then(normalizeRoomPayload);
+}
+
+export function removeRoomMember(roomId: string, accountId: string) {
+  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(accountId)}`, {
+    method: 'DELETE',
+  }).then(normalizeRoomPayload);
+}
+
+export function removeRoomTeam(roomId: string, teamId: string) {
+  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/teams/${encodeURIComponent(teamId)}`, {
+    method: 'DELETE',
+  }).then(normalizeRoomPayload);
+}
+
+export function updateRoom(roomId: string, input: { name: string; piLabel: string }) {
+  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}`, {
+    method: 'PUT',
+    body: input,
+  }).then(normalizeRoomPayload);
 }
 
 export function createInvite(roomId: string, kind: 'team' | 'room-person' | 'room-team', teamId?: string) {

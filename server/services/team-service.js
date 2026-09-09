@@ -6,8 +6,8 @@ function requireTeamManager(team, user) {
   }
 }
 
-async function readUpdatedTeam(db, userId, teamId) {
-  const teams = await readTeams(db, userId);
+async function readUpdatedTeam(db, user, teamId) {
+  const teams = await readTeams(db, user.id, user.role === 'admin');
   return teams.find((team) => team.id === teamId) || null;
 }
 
@@ -31,7 +31,7 @@ export async function addTeamMember(db, user, teamId, accountId) {
       VALUES (?, ?, 'member', ?) ON CONFLICT DO NOTHING`).bind(teamId, accountId, now),
     db.prepare('UPDATE teams SET updated_at = ? WHERE id = ?').bind(now, teamId),
   ]);
-  return readUpdatedTeam(db, user.id, teamId);
+  return readUpdatedTeam(db, user, teamId);
 }
 
 export async function removeTeamMember(db, user, teamId, accountId) {
@@ -49,7 +49,7 @@ export async function removeTeamMember(db, user, teamId, accountId) {
     db.prepare('DELETE FROM team_members WHERE team_id = ? AND account_id = ?').bind(teamId, accountId),
     db.prepare('UPDATE teams SET updated_at = ? WHERE id = ?').bind(new Date().toISOString(), teamId),
   ]);
-  return readUpdatedTeam(db, user.id, teamId);
+  return readUpdatedTeam(db, user, teamId);
 }
 
 export async function promoteTeamOwner(db, user, teamId, accountId) {
@@ -60,14 +60,14 @@ export async function promoteTeamOwner(db, user, teamId, accountId) {
     .bind(teamId, accountId)
     .first();
   if (!member) throw authError('Team member not found', 404);
-  if (team.owner_account_id === accountId && member.role === 'owner') return readUpdatedTeam(db, user.id, teamId);
+  if (team.owner_account_id === accountId && member.role === 'owner') return readUpdatedTeam(db, user, teamId);
   const now = new Date().toISOString();
   await db.batch([
     db.prepare("UPDATE team_members SET role = 'member' WHERE team_id = ? AND account_id = ?").bind(teamId, team.owner_account_id),
     db.prepare("UPDATE team_members SET role = 'owner' WHERE team_id = ? AND account_id = ?").bind(teamId, accountId),
     db.prepare('UPDATE teams SET owner_account_id = ?, updated_at = ? WHERE id = ?').bind(accountId, now, teamId),
   ]);
-  return readUpdatedTeam(db, user.id, teamId);
+  return readUpdatedTeam(db, user, teamId);
 }
 
 export async function deleteTeam(db, user, teamId) {
@@ -82,14 +82,23 @@ export async function deleteTeam(db, user, teamId) {
   return { ok: true, teamId };
 }
 
-export async function readTeams(db, userId) {
-  const result = await db.prepare(`SELECT t.id, t.name, t.owner_account_id, tm.role,
-      COUNT(all_members.account_id) AS member_count
-    FROM teams t
-    JOIN team_members tm ON tm.team_id = t.id AND tm.account_id = ?
-    LEFT JOIN team_members all_members ON all_members.team_id = t.id
-    GROUP BY t.id, t.name, t.owner_account_id, tm.role
-    ORDER BY t.updated_at DESC, t.id`).bind(userId).all();
+export async function readTeams(db, userId, includeAll = false) {
+  const result = includeAll
+    ? await db.prepare(`SELECT t.id, t.name, t.owner_account_id,
+        COALESCE(mine.role, CASE WHEN t.owner_account_id = ? THEN 'owner' ELSE 'member' END) AS role,
+        COUNT(all_members.account_id) AS member_count
+      FROM teams t
+      LEFT JOIN team_members mine ON mine.team_id = t.id AND mine.account_id = ?
+      LEFT JOIN team_members all_members ON all_members.team_id = t.id
+      GROUP BY t.id, t.name, t.owner_account_id, mine.role
+      ORDER BY t.updated_at DESC, t.id`).bind(userId, userId).all()
+    : await db.prepare(`SELECT t.id, t.name, t.owner_account_id, tm.role,
+        COUNT(all_members.account_id) AS member_count
+      FROM teams t
+      JOIN team_members tm ON tm.team_id = t.id AND tm.account_id = ?
+      LEFT JOIN team_members all_members ON all_members.team_id = t.id
+      GROUP BY t.id, t.name, t.owner_account_id, tm.role
+      ORDER BY t.updated_at DESC, t.id`).bind(userId).all();
   const teams = await Promise.all(rows(result).map(async (team) => {
     const members = await db.prepare(`SELECT a.id, a.display_name, a.email, tm.role
       FROM team_members tm JOIN accounts a ON a.id = tm.account_id
@@ -122,5 +131,5 @@ export async function createTeam(db, user, input) {
     db.prepare(`INSERT INTO team_members (team_id, account_id, role, created_at)
       VALUES (?, ?, 'owner', ?)`).bind(teamId, user.id, now),
   ]);
-  return readUpdatedTeam(db, user.id, teamId);
+  return readUpdatedTeam(db, user, teamId);
 }

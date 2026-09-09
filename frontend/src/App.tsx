@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
@@ -63,6 +63,7 @@ export default function App() {
     const payload = await loadRoom(roomId);
     setSelectedRoomId(roomId);
     setRoomPayload(payload);
+    setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
     return payload;
   }, []);
 
@@ -109,6 +110,7 @@ export default function App() {
       try {
         const payload = normalizeRoomPayload(candidate);
         if (payload.roomId !== selectedRoomId) return;
+        setRooms((current) => current.map((room) => room.id === payload.room.id ? { ...room, ...payload.room } : room));
         setRoomPayload((current) => payload.room.stateVersion !== undefined
           && current?.room.stateVersion !== undefined
           && payload.room.stateVersion < current.room.stateVersion
@@ -208,6 +210,7 @@ export default function App() {
       ]);
       setSelectedRoomId(roomId);
       setRoomPayload(payload);
+      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
       setAdminUsers(nextAdminUsers);
       setView('estimates');
       window.history.replaceState({}, '', `?room=${encodeURIComponent(roomId)}`);
@@ -393,10 +396,55 @@ export default function App() {
     if (!selectedRoomId) return;
     setSaving(true);
     try {
-      await addRoomMember(selectedRoomId, input);
-      const payload = await loadRoom(selectedRoomId);
+      const payload = await addRoomMember(selectedRoomId, input);
       setRoomPayload(payload);
+      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
       setNotice(input.teamId ? 'Team added to room' : 'Member added to room');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateRoom(name: string, piLabel: string) {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try {
+      const payload = await updateRoom(selectedRoomId, { name, piLabel });
+      setRoomPayload(payload);
+      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
+      setNotice('Room settings saved');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveRoomMember(accountId: string) {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try {
+      const payload = await removeRoomMember(selectedRoomId, accountId);
+      setRoomPayload(payload);
+      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
+      setNotice('Member removed from room');
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveRoomTeam(teamId: string) {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try {
+      const payload = await removeRoomTeam(selectedRoomId, teamId);
+      setRoomPayload(payload);
+      setRooms((current) => current.map((candidate) => candidate.id === payload.room.id ? { ...candidate, ...payload.room } : candidate));
+      setNotice('Team removed from room');
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -462,6 +510,7 @@ export default function App() {
       await deleteAdminUser(selectedRoomId, accountId);
       setAdminUsers((current) => current.filter((account) => account.id !== accountId));
       setDirectoryUsers((current) => current.filter((account) => account.id !== accountId));
+      if (selectedRoomId) await refreshRoom(selectedRoomId);
       setNotice('User removed');
     } catch (error) {
       setNotice(errorMessage(error));
@@ -515,7 +564,7 @@ export default function App() {
     : view === 'estimates'
       ? <EstimatesPage room={room} state={state} user={user} saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
       : view === 'rooms'
-        ? <RoomsPage rooms={rooms} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
+        ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
           ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
           : view === 'settings'

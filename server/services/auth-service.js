@@ -52,27 +52,9 @@ export async function ensureBootstrapAdmin(db, env) {
       VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, ?, ?) ON CONFLICT DO NOTHING`)
       .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, accountId, now, now),
     db.prepare('UPDATE rooms SET owner_account_id = ? WHERE id = ?').bind(accountId, DEFAULT_ROOM_ID),
-    db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'owner', ?)
-      ON CONFLICT(room_id, account_id) DO UPDATE SET role = 'owner'`)
-      .bind(DEFAULT_ROOM_ID, accountId, now),
   ]);
   const account = await db.prepare('SELECT id, username, email, display_name, role FROM accounts WHERE id = ? LIMIT 1').bind(accountId).first();
   return accountUser(account);
-}
-export async function ensureDefaultRoomMembership(db, user) {
-  const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(DEFAULT_ROOM_ID).first();
-  if (!room) {
-    const now = new Date().toISOString();
-    await db.prepare(`INSERT INTO rooms (id, name, pi_label, owner_account_id, sequence_key, selected_story_key, vote_mode, ai_enabled, capacity_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'fibonacci', NULL, 'hidden', 1, '{}', ?, ?)`)
-      .bind(DEFAULT_ROOM_ID, DEFAULT_ROOM_NAME, DEFAULT_PI_LABEL, user.id, now, now)
-      .run();
-  }
-  await db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-    VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
-    .bind(DEFAULT_ROOM_ID, user.id, new Date().toISOString())
-    .run();
 }
 
 export async function createSession(db, accountId) {
@@ -101,7 +83,6 @@ export async function login(db, env, input) {
   const now = new Date().toISOString();
   await db.prepare('UPDATE accounts SET last_login_at = ?, updated_at = ? WHERE id = ?').bind(now, now, account.id).run();
   const user = accountUser(account);
-  await ensureDefaultRoomMembership(db, user);
   const token = await createSession(db, account.id);
   return { user, token };
 }
@@ -142,9 +123,6 @@ export async function createManagedUser(db, user, input) {
       (id, email, display_name, username, password_hash, password_salt, role, disabled, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'member', 0, ?, ?)`)
       .bind(accountId, `${username}@pointline.local`, displayName, username, passwordRecord.hash, passwordRecord.salt, now, now),
-    db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
-      VALUES (?, ?, 'editor', ?) ON CONFLICT DO NOTHING`)
-      .bind(DEFAULT_ROOM_ID, accountId, now),
   ]);
   return {
     user: accountUser({ id: accountId, username, email: `${username}@pointline.local`, display_name: displayName, role: 'member' }),

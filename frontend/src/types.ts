@@ -8,13 +8,31 @@ export type User = {
   role: Role;
 };
 
+export type RoomMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'member';
+  teamId: string | null;
+  teamName: string | null;
+};
+
+export type RoomTeam = {
+  id: string;
+  name: string;
+  memberCount: number;
+};
+
 export type Room = {
   id: string;
   name: string;
   piLabel: string;
   memberCount: number;
+  teamCount?: number;
   role: Role;
   stateVersion?: number;
+  members?: RoomMember[];
+  teams?: RoomTeam[];
 };
 
 export type TeamMember = {

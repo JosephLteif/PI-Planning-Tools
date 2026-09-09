@@ -187,7 +187,7 @@ export function normalizeLinks(links, serviceIds) {
     .filter((link) => link.serviceId && serviceIds.has(link.serviceId));
 }
 
-export function normalizeCapacity(source, roster = []) {
+export function normalizeCapacity(source, roster = null) {
   const input = source && typeof source === 'object' ? source : {};
   const defaults = input.defaults && typeof input.defaults === 'object' ? input.defaults : {};
   const percent = (value, fallback) => {
@@ -200,9 +200,9 @@ export function normalizeCapacity(source, roster = []) {
     name: cleanText(member?.name, 'Planner', 120),
     office: member?.office === 'cyprus' ? 'cyprus' : 'beirut',
     trainStaffDevCapacityPct: percent(member?.trainStaffDevCapacityPct, 0.75),
-  })).filter((member) => member.id && (!roster.length || roster.some((candidate) => cleanId(candidate?.id) === member.id))) : [];
+  })).filter((member) => member.id && (roster === null || roster.some((candidate) => cleanId(candidate?.id) === member.id))) : [];
   const knownIds = new Set(members.map((member) => member.id));
-  roster.forEach((member) => {
+  if (Array.isArray(roster)) roster.forEach((member) => {
     const id = cleanId(member?.id);
     if (id && !knownIds.has(id)) {
       members.push({ id, name: cleanText(member?.name, 'Planner', 120), office: 'beirut', trainStaffDevCapacityPct: 0.75 });
@@ -231,7 +231,7 @@ export function normalizeCapacity(source, roster = []) {
   };
 }
 
-export function normalizeStateInput(input) {
+export function normalizeStateInput(input, capacityRoster = null) {
   const source = input && typeof input === 'object' ? input : {};
   const domains = Array.isArray(source.domains)
     ? source.domains.map((domain) => ({
@@ -288,7 +288,7 @@ export function normalizeStateInput(input) {
     voteMode: roomSettingsSource.voteMode === 'open' ? 'open' : roomSettingsSource.voteMode === 'hidden' ? 'hidden' : roundMode,
     hideVoteCountUntilComplete: roomSettingsSource.hideVoteCountUntilComplete === true || hideVoteCountUntilComplete,
   };
-  const capacity = normalizeCapacity(source.capacity);
+  const capacity = normalizeCapacity(source.capacity, capacityRoster);
 
   return {
     sequence: ALLOWED_SEQUENCES.has(source.sequence) ? source.sequence : 'fibonacci',
