@@ -60,12 +60,13 @@
 .allocation-estimate-toggle-label { padding: 0 5px; color: var(--ink-soft); font-size: 10px; font-weight: 700; }
 .allocation-estimate-option { padding: 7px 10px; color: var(--ink-soft); background: transparent; border: 0; border-radius: 6px; font-size: 10px; font-weight: 700; }
 .allocation-estimate-option:hover, .allocation-estimate-option.active { color: var(--ink); background: #fff; box-shadow: 0 2px 5px rgba(28, 45, 70, 0.08); }
-.allocation-impact-summary { display: grid; grid-template-columns: 1.35fr repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 15px; }
+.allocation-impact-summary { display: grid; grid-template-columns: 1.35fr repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 15px; }
 .allocation-impact-item { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
 .allocation-impact-item span, .allocation-impact-item small { color: var(--ink-soft); font-size: 9px; font-weight: 700; }
 .allocation-impact-item strong { color: var(--ink); font-family: 'Space Grotesk', sans-serif; font-size: 18px; }
 .allocation-impact-item small { line-height: 1.35; }
 .allocation-impact-primary { background: var(--blue-soft); border-color: #cddcff; }
+.allocation-impact-stretch { background: #f7faef; border-color: #dfe9c1; }
 .allocation-impact-primary.positive strong, .ai-gain-metric.positive strong, .ai-gain-chip.positive { color: var(--green); }
 .allocation-impact-primary.negative strong, .ai-gain-metric.negative strong, .ai-gain-chip.negative { color: var(--coral); }
 .allocation-impact-primary.neutral strong, .ai-gain-metric.neutral strong, .ai-gain-chip.neutral { color: var(--blue); }
@@ -95,6 +96,7 @@
 html[data-theme='dark'] .allocation-estimate-toggle { background: #1b2d46; }
 html[data-theme='dark'] .allocation-estimate-option.active { background: var(--surface); }
 html[data-theme='dark'] .allocation-impact-primary { border-color: #31517d; }
+html[data-theme='dark'] .allocation-impact-stretch { background: #26331d; border-color: #5b7130; }
 html[data-theme='dark'] .ai-gain-metric.positive { background: #17352f; border-color: #2f6759; }
 html[data-theme='dark'] .ai-gain-metric.negative { background: #402b2a; border-color: #75453d; }
 html[data-theme='dark'] .ai-gain-chip { background: var(--surface); }

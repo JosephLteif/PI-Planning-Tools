@@ -18,6 +18,11 @@ export function emptyStory(input: Partial<Story> = {}): Story {
   };
 }
 
+export function isStretchStory(story: Story, stories: Story[]) {
+  if (story.type === 'Epic') return false;
+  return story.stretch === true || (story.epicId ? stories.find((candidate) => candidate.id === story.epicId)?.stretch === true : false);
+}
+
 export function normalizeImportedStory(input: {
   id?: string;
   title?: string;

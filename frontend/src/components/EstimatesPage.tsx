@@ -5,7 +5,7 @@ import { StoryEditorModal } from './StoryEditorModal';
 import { AppIcon } from './AppIcon';
 import type { Room, RoomState, Story, User } from '../types';
 import { cloneState, sequences } from '../state';
-import { nextImportedStoryId } from '../storyUtils';
+import { isStretchStory, nextImportedStoryId } from '../storyUtils';
 
 type EstimatesPageProps = {
   room: Room;
@@ -32,11 +32,6 @@ type StoryQueueProps = {
   onDelete: (story: Story) => void;
   onRevote: (story: Story) => void;
 };
-
-function isStretchStory(story: Story, stories: Story[]) {
-  if (story.type === 'Epic') return false;
-  return story.stretch || (story.epicId ? stories.find((candidate) => candidate.id === story.epicId)?.stretch === true : false);
-}
 
 function formatStoryPoints(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);

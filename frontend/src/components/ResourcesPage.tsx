@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import type { RoomState, Story } from '../types';
 import { cloneState } from '../state';
+import { isStretchStory } from '../storyUtils';
 import { AppIcon } from './AppIcon';
 import { EpicResourceSearch, matchesEpicSearch, type EpicSearchOption } from './EpicResourceSearch';
 import { StoryEditorModal } from './StoryEditorModal';
@@ -193,6 +194,18 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
     team: totals.team + (story.manual || 0),
     ai: totals.ai + (story.ai || 0),
   }), { team: 0, ai: 0 }), [pairedStories]);
+  const stretchTotals = useMemo(() => state.stories.reduce((totals, story) => {
+    if (story.type === 'Epic' || !isStretchStory(story, state.stories)) return totals;
+    if (story.manual !== null) {
+      totals.team += story.manual;
+      totals.teamCount += 1;
+    }
+    if (story.ai !== null) {
+      totals.ai += story.ai;
+      totals.aiCount += 1;
+    }
+    return totals;
+  }, { team: 0, ai: 0, teamCount: 0, aiCount: 0 }), [state.stories]);
   const displayRows = useMemo(() => estimateView === 'gain'
     ? comparisonRows.map((row) => ({ ...row, points: row.teamPoints }))
     : rows.map((row) => ({ ...row, teamPoints: null, aiPoints: null })), [comparisonRows, estimateView, rows]);
@@ -311,6 +324,11 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
             <span>AI estimate</span>
             <strong>{formatEstimate(pairedStories.length ? comparisonTotals.ai : null)}</strong>
             <small>same stories as team</small>
+          </div>
+          <div className="allocation-impact-item allocation-impact-stretch">
+            <span>Stretch SPs</span>
+            <strong>{formatEstimate(stretchTotals.team)}</strong>
+            <small>{stretchTotals.aiCount ? `${formatEstimate(stretchTotals.ai)} AI stretch points` : 'No AI stretch estimates yet'}</small>
           </div>
           <div className="allocation-impact-item">
             <span>Compared</span>
