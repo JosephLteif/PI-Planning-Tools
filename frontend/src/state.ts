@@ -50,6 +50,7 @@ export function defaultRoomState(): RoomState {
       ai: null,
       aiEnabled: false,
       saved: false,
+      stretch: false,
       serviceLinks: [],
     }],
     domains: [],

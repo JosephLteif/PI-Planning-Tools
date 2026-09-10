@@ -787,6 +787,31 @@ h1 {
   accent-color: var(--blue);
 }
 
+.story-stretch-checkbox {
+  align-items: flex-start;
+  padding: 10px 0 0;
+}
+
+.story-stretch-checkbox input {
+  margin-top: 2px;
+}
+
+.story-stretch-checkbox span {
+  display: grid;
+  gap: 3px;
+}
+
+.story-stretch-checkbox strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.story-stretch-checkbox small {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .settings-sequence {
   justify-content: space-between;
   padding: 14px 0 0;
@@ -1167,6 +1192,16 @@ h1 {
   font-size: 10px;
 }
 
+.queue-header .queue-commitment {
+  margin-top: 4px;
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.queue-commitment strong {
+  color: var(--ink);
+}
+
 .queue-header .icon-button {
   margin-top: 0;
 }
@@ -1329,6 +1364,305 @@ h1 {
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
+}
+
+.epic-selector-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 1px;
+}
+
+.epic-picker {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+
+.epic-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.epic-picker-trigger:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.epic-picker-trigger-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.epic-picker-trigger strong,
+.epic-picker-trigger small,
+.epic-picker-option strong,
+.epic-picker-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epic-picker-trigger strong {
+  font-size: 11px;
+}
+
+.epic-picker-trigger small,
+.epic-picker-option small {
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.epic-picker-trigger > svg {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+}
+
+.epic-picker-menu {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  min-width: min(100%, 280px);
+  padding: 7px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 14px 30px rgba(23, 42, 70, 0.16);
+}
+
+.epic-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  color: var(--ink-soft);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.epic-picker-search:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(73, 121, 222, 0.12);
+}
+
+.epic-picker-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 10px;
+}
+
+.epic-picker-options {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-top: 6px;
+}
+
+.epic-picker-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.epic-picker-option:hover,
+.epic-picker-option[aria-selected='true'] {
+  background: var(--blue-soft);
+}
+
+.epic-picker-option > svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.epic-picker-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.epic-picker-option strong {
+  font-size: 10px;
+}
+
+.epic-picker-empty {
+  margin: 6px 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.epic-resource-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 15px;
+}
+
+.epic-resource-toolbar > div {
+  min-width: 0;
+}
+
+.epic-resource-toolbar p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.epic-resource-search {
+  position: relative;
+  flex: 0 1 360px;
+  min-width: 220px;
+}
+
+.epic-resource-search-input {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 9px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.epic-resource-search-input:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(73, 121, 222, 0.12);
+}
+
+.epic-resource-search-input input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 10px;
+}
+
+.epic-resource-search-clear {
+  display: grid;
+  flex: 0 0 auto;
+  padding: 2px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 0;
+  place-items: center;
+}
+
+.epic-resource-search-clear:hover {
+  color: var(--ink);
+}
+
+.epic-resource-search-menu {
+  position: absolute;
+  z-index: 26;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 14px 30px rgba(23, 42, 70, 0.16);
+}
+
+.epic-resource-search-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.epic-resource-search-option:hover {
+  background: var(--blue-soft);
+}
+
+.epic-resource-search-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.epic-resource-search-option strong,
+.epic-resource-search-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epic-resource-search-option strong {
+  font-size: 10px;
+}
+
+.epic-resource-search-option small {
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.epic-resource-search-option > svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.epic-resource-search-empty {
+  margin: 7px 8px;
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.modal-epic-picker {
+  width: 100%;
+  padding: 9px 10px;
+  background: #fbfcfe;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+html[data-theme='dark'] .modal-epic-picker {
+  background: var(--surface);
 }
 
 .epic-selector-delete {
@@ -3188,6 +3522,39 @@ h1 {
   margin-top: 22px;
 }
 
+.service-manager-card {
+  margin-top: 14px;
+  padding: 17px 18px;
+}
+
+.service-manager-card .lower-card-heading {
+  margin-bottom: 0;
+}
+
+.service-manager-card .service-manager-grid {
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.service-manager-card .service-manager-column {
+  padding: 11px;
+}
+
+.service-manager-card .manager-form,
+.service-manager-card .manager-list {
+  margin-top: 8px;
+}
+
+.service-manager-card .manager-row {
+  min-height: 31px;
+  padding: 5px 7px;
+}
+
+.service-manager-card .modal-input {
+  padding: 7px 8px;
+  font-size: 10px;
+}
+
 .service-manager-column {
   min-width: 0;
   padding: 15px;
@@ -4279,6 +4646,30 @@ h1 {
   gap: 16px;
 }
 
+.capacity-defaults-card .capacity-default-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.capacity-defaults-card .capacity-default-grid .modal-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.capacity-defaults-card .capacity-default-grid .modal-field:last-child {
+  border-bottom: 0;
+}
+
+.capacity-defaults-card .capacity-default-grid .modal-input {
+  width: 78px;
+  padding: 7px 8px;
+}
+
 .capacity-defaults-card .settings-copy,
 .capacity-members-card .settings-copy {
   max-width: 74ch;
@@ -4955,9 +5346,24 @@ html[data-theme='dark'] .epic-selector-mark.is-complete {
   background: #263b29;
 }
 
+html[data-theme='dark'] .epic-resource-search-option:hover {
+  background: #1b2d46;
+}
+
 html[data-theme='dark'] .history-detail-row td,
 html[data-theme='dark'] .history-detail {
   background: #102036;
+}
+
+@media (max-width: 900px) {
+  .epic-resource-toolbar {
+    flex-direction: column;
+  }
+
+  .epic-resource-search {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 @media (max-width: 640px) {

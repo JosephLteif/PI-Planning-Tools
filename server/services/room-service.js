@@ -55,7 +55,7 @@ export async function readRoomState(db, roomId, userId) {
     db.prepare('SELECT id, name, sort_order FROM domains WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare('SELECT id, name, domain_id, sort_order FROM services WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare(`SELECT story_key, type, epic_id, title, url, description, acceptance_json, sort_order,
-      manual_estimate, ai_estimate, ai_enabled, saved
+      manual_estimate, ai_estimate, ai_enabled, saved, stretch
       FROM stories WHERE room_id = ? ORDER BY sort_order, story_key`).bind(roomId).all(),
     db.prepare(`SELECT story_key, service_id, allocation_pct
       FROM story_service_allocations WHERE room_id = ? ORDER BY story_key, service_id`).bind(roomId).all(),
@@ -116,6 +116,7 @@ export async function readRoomState(db, roomId, userId) {
       ai: parseScore(story.ai_estimate),
       aiEnabled: story.ai_enabled === 1,
       saved: story.saved === 1,
+      stretch: Number(story.stretch) === 1,
       serviceLinks: linksByStory.get(story.story_key) || [],
     };
   });
@@ -586,14 +587,14 @@ export async function saveRoomState(db, roomId, input, user) {
       ON CONFLICT(room_id, id) DO UPDATE SET name = excluded.name, domain_id = excluded.domain_id, sort_order = excluded.sort_order, active = 1`)
       .bind(roomId, service.id, service.name, service.domainId || null, index)),
     ...source.stories.map((story, index) => db.prepare(`INSERT INTO stories
-      (room_id, story_key, type, epic_id, title, url, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (room_id, story_key, type, epic_id, title, url, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved, stretch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id, story_key) DO UPDATE SET type = excluded.type, title = excluded.title,
         epic_id = excluded.epic_id, url = excluded.url, description = excluded.description, acceptance_json = excluded.acceptance_json, sort_order = excluded.sort_order,
         manual_estimate = excluded.manual_estimate, ai_estimate = excluded.ai_estimate,
-        ai_enabled = excluded.ai_enabled, saved = excluded.saved`)
+        ai_enabled = excluded.ai_enabled, saved = excluded.saved, stretch = excluded.stretch`)
       .bind(roomId, story.id, story.type, story.epicId, story.title, story.url || null, story.description, JSON.stringify(story.acceptance), index,
-        story.manual, story.ai, story.aiEnabled ? 1 : 0, story.saved ? 1 : 0)),
+        story.manual, story.ai, story.aiEnabled ? 1 : 0, story.saved ? 1 : 0, story.stretch ? 1 : 0)),
     ...source.stories.map((story) => db.prepare('DELETE FROM story_service_allocations WHERE room_id = ? AND story_key = ?')
       .bind(roomId, story.id)),
     ...source.stories.flatMap((story) => story.serviceLinks.map((link) => db.prepare(`INSERT INTO story_service_allocations

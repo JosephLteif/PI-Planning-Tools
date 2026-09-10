@@ -115,6 +115,7 @@ export const stories = pgTable('stories', {
   aiEstimate: real('ai_estimate'),
   aiEnabled: integer('ai_enabled').notNull().default(0),
   saved: integer('saved').notNull().default(0),
+  stretch: integer('stretch').notNull().default(0),
 }, (table) => ({
   storiesPk: primaryKey({ columns: [table.roomId, table.storyKey] }),
   storiesOrderIdx: index('stories_order_idx').on(table.roomId, table.sortOrder),

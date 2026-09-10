@@ -125,6 +125,7 @@ function remapAccountReferences(data, accountIdMap) {
     planningRoundParticipants: data.planningRoundParticipants.map((record) => ({ ...record, account_id: remap(record.account_id) })),
     roomVotingMembers: data.roomVotingMembers.map((record) => ({ ...record, account_id: remap(record.account_id) })),
     votes: data.votes.map((record) => ({ ...record, account_id: remap(record.account_id) })),
+    stories: data.stories.map((record) => ({ ...record, stretch: record.stretch === true || Number(record.stretch) === 1 ? 1 : 0 })),
   };
 }
 
@@ -178,14 +179,14 @@ export async function importBackup(db, input) {
         sort_order = excluded.sort_order, active = excluded.active`, record,
       ['room_id', 'id', 'name', 'domain_id', 'sort_order', 'active'], 'services')),
     ...data.stories.map((record) => prepareInsert(db, `INSERT INTO stories
-      (room_id, story_key, type, epic_id, title, url, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (room_id, story_key, type, epic_id, title, url, description, acceptance_json, sort_order, manual_estimate, ai_estimate, ai_enabled, saved, stretch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id, story_key) DO UPDATE SET type = excluded.type, epic_id = excluded.epic_id,
         title = excluded.title, url = excluded.url, description = excluded.description,
         acceptance_json = excluded.acceptance_json, sort_order = excluded.sort_order,
         manual_estimate = excluded.manual_estimate, ai_estimate = excluded.ai_estimate,
-        ai_enabled = excluded.ai_enabled, saved = excluded.saved`, record,
-      ['room_id', 'story_key', 'type', 'epic_id', 'title', 'url', 'description', 'acceptance_json', 'sort_order', 'manual_estimate', 'ai_estimate', 'ai_enabled', 'saved'], 'stories')),
+        ai_enabled = excluded.ai_enabled, saved = excluded.saved, stretch = excluded.stretch`, record,
+      ['room_id', 'story_key', 'type', 'epic_id', 'title', 'url', 'description', 'acceptance_json', 'sort_order', 'manual_estimate', 'ai_estimate', 'ai_enabled', 'saved', 'stretch'], 'stories')),
     ...data.storyServiceAllocations.map((record) => prepareInsert(db, `INSERT INTO story_service_allocations
       (room_id, story_key, service_id, allocation_pct)
       VALUES (?, ?, ?, ?)

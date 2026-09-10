@@ -13,6 +13,7 @@ export function emptyStory(input: Partial<Story> = {}): Story {
     ai: input.ai ?? null,
     aiEnabled: input.aiEnabled ?? false,
     saved: input.saved ?? false,
+    stretch: input.stretch ?? false,
     serviceLinks: input.serviceLinks ? input.serviceLinks.map((link) => ({ ...link })) : [],
   };
 }

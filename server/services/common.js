@@ -265,6 +265,7 @@ export function normalizeStateInput(input, capacityRoster = null) {
       ai: story?.type === 'Epic' ? null : parseScore(story?.ai),
       aiEnabled: story?.type !== 'Epic' && (story?.aiEnabled === true || parseScore(story?.ai) !== null),
       saved: story?.saved === true,
+      stretch: (story?.type === 'Epic' || story?.type === 'Feature') && story?.stretch === true,
       serviceLinks: normalizeLinks(story?.serviceLinks, serviceIds),
     })).filter((story) => story.id && story.title)
     : [];

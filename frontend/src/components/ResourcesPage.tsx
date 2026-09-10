@@ -1,10 +1,13 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import type { RoomState } from '../types';
+import type { RoomState, Story } from '../types';
 import { cloneState } from '../state';
 import { AppIcon } from './AppIcon';
+import { EpicResourceSearch, matchesEpicSearch, type EpicSearchOption } from './EpicResourceSearch';
+import { StoryEditorModal } from './StoryEditorModal';
 
 type ResourcesPageProps = { state: RoomState; saving: boolean; readOnly?: boolean; onSave: (state: RoomState) => Promise<void> };
 type ResourceTab = 'service' | 'domain' | 'epic';
+type ResourceView = ResourceTab | 'catalog';
 type EstimateSource = 'team' | 'ai';
 type EstimateView = EstimateSource | 'gain';
 type EpicResourceRow = {
@@ -122,7 +125,8 @@ function epicResourceRows(state: RoomState, view: EstimateView): EpicResourceRow
   });
 
   const epicNames = new Map(state.stories.filter((story) => story.type === 'Epic').map((story) => [story.id, story.title]));
-  const keys = new Set([...teamAllocations.keys(), ...aiAllocations.keys(), ...childrenByEpic.keys()]);
+  const epicIds = state.stories.filter((story) => story.type === 'Epic').map((story) => story.id);
+  const keys = new Set([...epicIds, ...teamAllocations.keys(), ...aiAllocations.keys(), ...childrenByEpic.keys()]);
   return [...keys]
     .map((id) => ({
       id,
@@ -134,7 +138,7 @@ function epicResourceRows(state: RoomState, view: EstimateView): EpicResourceRow
       comparisonAiPoints: comparisonAiAllocations.get(id) || 0,
       stories: childrenByEpic.get(id) || [],
     }))
-    .filter((row) => row.stories.length > 0 || row.points > 0)
+    .filter((row) => row.id !== 'unassigned' || row.stories.length > 0 || row.points > 0)
     .sort((left, right) => right.points - left.points || left.name.localeCompare(right.name));
 }
 
@@ -151,16 +155,37 @@ function entityId(prefix: string, ids: string[]) {
 }
 
 export function ResourcesPage({ state, saving, readOnly = false, onSave }: ResourcesPageProps) {
-  const [tab, setTab] = useState<ResourceTab>('service');
+  const [tab, setTab] = useState<ResourceView>('service');
   const [estimateView, setEstimateView] = useState<EstimateView>('team');
   const [expandedEpics, setExpandedEpics] = useState<Record<string, boolean>>({});
+  const [epicSearch, setEpicSearch] = useState('');
   const [domainName, setDomainName] = useState('');
   const [serviceName, setServiceName] = useState('');
   const [serviceDomain, setServiceDomain] = useState('');
+  const [editingEpic, setEditingEpic] = useState<Story | null>(null);
   const estimateSource: EstimateSource = estimateView === 'ai' ? 'ai' : 'team';
-  const rows = useMemo(() => allocationRows(state, tab, estimateSource), [state, tab, estimateSource]);
-  const comparisonRows = useMemo(() => comparisonAllocationRows(state, tab), [state, tab]);
+  const allocationTab: ResourceTab = tab === 'catalog' ? 'service' : tab;
+  const rows = useMemo(() => allocationRows(state, allocationTab, estimateSource), [allocationTab, estimateSource, state]);
+  const comparisonRows = useMemo(() => comparisonAllocationRows(state, allocationTab), [allocationTab, state]);
   const epicRows = useMemo(() => epicResourceRows(state, estimateView), [state, estimateView]);
+  const epicSearchOptions = useMemo<EpicSearchOption[]>(() => epicRows.map((row) => {
+    const epic = state.stories.find((story) => story.id === row.id && story.type === 'Epic');
+    const links = epic ? epic.serviceLinks : row.stories.flatMap((story) => effectiveServiceLinks(state, story));
+    const serviceIds = [...new Set(links.map((link) => link.serviceId))];
+    const products = [...new Set(serviceIds.map((serviceId) => state.services.find((service) => service.id === serviceId)?.name).filter((name): name is string => Boolean(name)))];
+    const domains = [...new Set(serviceIds.map((serviceId) => {
+      const service = state.services.find((candidate) => candidate.id === serviceId);
+      return service ? state.domains.find((domain) => domain.id === service.domainId)?.name : undefined;
+    }).filter((name): name is string => Boolean(name)))];
+    return { id: row.id, name: row.name, domains, products };
+  }), [epicRows, state]);
+  const filteredEpicRows = useMemo(() => {
+    const options = new Map(epicSearchOptions.map((option) => [option.id, option]));
+    return epicRows.filter((row) => {
+      const option = options.get(row.id);
+      return option ? matchesEpicSearch(option, epicSearch) : true;
+    });
+  }, [epicRows, epicSearch, epicSearchOptions]);
   const estimatedStories = state.stories.filter((story) => story.type !== 'Epic' && estimateValue(story, estimateSource) !== null);
   const total = estimatedStories.reduce((sum, story) => sum + (estimateValue(story, estimateSource) || 0), 0);
   const pairedStories = useMemo(() => comparisonStories(state), [state]);
@@ -222,12 +247,21 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
     await onSave(next);
   }
 
+  async function saveEpic(epic: Story) {
+    if (readOnly) return;
+    const next = cloneState(state);
+    next.stories = next.stories.map((story) => story.id === epic.id ? epic : story);
+    await onSave(next);
+    setEditingEpic(null);
+  }
+
   function toggleEpic(epicId: string) {
     setExpandedEpics((current) => ({ ...current, [epicId]: !current[epicId] }));
   }
 
   return (
-    <div className="management-content">
+    <>
+      <div className="management-content">
       <div className="hero-row">
         <div>
           <p className="eyebrow">Workspace · resources</p>
@@ -239,28 +273,29 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
       <section className="card allocation-card pl-allocation-card">
         <div className="lower-card-heading">
           <div>
-            <h2>Resource allocation</h2>
-            <p>{estimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories.`}</p>
+            <h2>{tab === 'catalog' ? 'Resource catalog' : 'Resource allocation'}</h2>
+            <p>{tab === 'catalog' ? 'Manage domains and services used by the planning room.' : estimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories.`}</p>
           </div>
           <div className="allocation-heading-controls">
-            <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
+            {tab !== 'catalog' ? <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
               <span className="allocation-estimate-toggle-label">Show</span>
               {(['team', 'ai', 'gain'] as const).map((view) => (
                 <button key={view} className={`allocation-estimate-option${estimateView === view ? ' active' : ''}`} type="button" aria-pressed={estimateView === view} onClick={() => setEstimateView(view)}>
                   {view === 'team' ? 'Team' : view === 'ai' ? 'AI' : 'AI gain'}
                 </button>
               ))}
-            </div>
+            </div> : null}
             <div className="allocation-tabs" role="tablist" aria-label="Resource breakdown">
-              {(['service', 'domain', 'epic'] as const).map((item) => (
+              {(['service', 'domain', 'epic', 'catalog'] as const).map((item) => (
                 <button key={item} className={`allocation-tab${tab === item ? ' active' : ''}`} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}>
-                  {item === 'service' ? 'By service' : item === 'domain' ? 'By domain' : 'By epic'}
+                  {item === 'service' ? 'By service' : item === 'domain' ? 'By domain' : item === 'epic' ? 'By epic' : 'Catalog'}
                 </button>
               ))}
             </div>
           </div>
         </div>
 
+        {tab !== 'catalog' ? <>
         <div className="allocation-impact-summary" aria-label="Overall AI gain">
           <div className={`allocation-impact-item allocation-impact-primary ${gainTone(comparisonTotals.team, comparisonTotals.ai)}`}>
             <span>Overall AI gain</span>
@@ -287,8 +322,16 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         <div className="allocation-breakdown">
           {tab === 'epic' ? (
             <div className="epic-resource-list">
-              {epicRows.length ? epicRows.map((row) => {
+              <div className="epic-resource-toolbar">
+                <div>
+                  <span className="section-kicker">Epic allocation</span>
+                  <p>Search by epic name, domain, or product.</p>
+                </div>
+                <EpicResourceSearch options={epicSearchOptions} value={epicSearch} onChange={setEpicSearch} />
+              </div>
+              {filteredEpicRows.length ? filteredEpicRows.map((row) => {
                 const expanded = expandedEpics[row.id] === true;
+                const epic = state.stories.find((story) => story.id === row.id && story.type === 'Epic');
                 const teamStories = row.stories.filter((story) => story.manual !== null);
                 const aiStories = row.stories.filter((story) => story.ai !== null);
                 const pairedEpicStories = row.stories.filter((story) => story.manual !== null && story.ai !== null);
@@ -311,6 +354,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                         </button>
                       </div>
                       <div className="epic-resource-actions">
+                        {epic && !readOnly ? <button className="story-action-button" type="button" disabled={saving} onClick={() => setEditingEpic(epic)} aria-label={`Edit ${epic.title}`}><AppIcon name="pencil" size={13} /></button> : null}
                         <span className="epic-resource-progress">{selectedStories.length}/{row.stories.length} {selectedLabel} estimates</span>
                       </div>
                     </div>
@@ -349,7 +393,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                     ) : null}
                   </article>
                 );
-              }) : <div className="empty-state"><h2>No epic allocation data yet</h2><p>Link stories to an epic and add a {estimateView === 'team' ? 'team' : estimateView === 'ai' ? 'AI' : 'team and AI'} estimate to see the breakdown here.</p></div>}
+              }) : <div className="empty-state"><h2>{epicSearch.trim() ? 'No matching epics' : 'No epic allocation data yet'}</h2><p>{epicSearch.trim() ? 'Try another name, domain, or product.' : `Link stories to an epic and add a ${estimateView === 'team' ? 'team' : estimateView === 'ai' ? 'AI' : 'team and AI'} estimate to see the breakdown here.`}</p></div>}
             </div>
           ) : (
             <div className="breakdown-list">
@@ -371,9 +415,10 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
           )}
         </div>
         <p className="allocation-note">Use Team / AI / AI gain to switch every allocation tab. AI gain compares only stories with both estimates and uses the same service allocation weighting. Expanded epics always show both estimates for each individual story.</p>
+        </> : null}
       </section>
 
-      <section className="card service-manager-card">
+      {tab === 'catalog' ? <section className="card service-manager-card">
         <div className="lower-card-heading">
           <div>
             <p className="section-kicker">Resource catalog</p>
@@ -395,8 +440,10 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
             <div className="manager-list">{state.services.length ? state.services.map((service) => <div className="manager-row manager-service-row" key={service.id}><span><strong>{service.name}</strong><small>{state.domains.find((domain) => domain.id === service.domainId)?.name || 'No domain'}</small></span><select className="manager-domain-select" value={service.domainId} onChange={(event) => void updateServiceDomain(service.id, event.target.value)} aria-label={`Domain for ${service.name}`} disabled={readOnly}><option value="">No domain yet</option>{state.domains.map((domain) => <option value={domain.id} key={domain.id}>{domain.name}</option>)}</select><button className="icon-button compact-icon" type="button" disabled={readOnly} onClick={() => void removeService(service.id)} aria-label={`Remove ${service.name}`}><AppIcon name="x" size={14} /></button></div>) : <p className="empty-manager">No services yet.</p>}</div>
           </div>
         </div>
-      </section>
-    </div>
+        </section> : null}
+      </div>
+      {editingEpic ? <StoryEditorModal key={editingEpic.id} state={state} story={editingEpic} saving={saving} onClose={() => setEditingEpic(null)} onSave={saveEpic} /> : null}
+    </>
   );
 }
 

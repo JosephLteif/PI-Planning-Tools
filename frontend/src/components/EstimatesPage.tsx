@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ImportStoriesModal } from './ImportStoriesModal';
+import { EpicPicker } from './EpicPicker';
 import { StoryEditorModal } from './StoryEditorModal';
 import { AppIcon } from './AppIcon';
 import type { Room, RoomState, Story, User } from '../types';
@@ -32,6 +33,15 @@ type StoryQueueProps = {
   onRevote: (story: Story) => void;
 };
 
+function isStretchStory(story: Story, stories: Story[]) {
+  if (story.type === 'Epic') return false;
+  return story.stretch || (story.epicId ? stories.find((candidate) => candidate.id === story.epicId)?.stretch === true : false);
+}
+
+function formatStoryPoints(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 function StoryQueue({ stories, selectedId, canManage, voting, onSelect, onNew, onImport, onEdit, onMove, onDelete, onRevote }: StoryQueueProps) {
   const epics = useMemo(() => stories.filter((story) => story.type === 'Epic'), [stories]);
   const epicGroups = useMemo(() => epics.map((epic) => ({
@@ -52,6 +62,7 @@ function StoryQueue({ stories, selectedId, canManage, voting, onSelect, onNew, o
   }, [epics, focusedEpicId, selectedStoryEpicId]);
 
   const focusedGroup = epicGroups.find((group) => group.epic.id === focusedEpicId);
+  const focusedEpic = focusedGroup?.epic;
   const focusedDone = focusedGroup?.children.filter((story) => story.manual !== null).length || 0;
   const focusedTotal = focusedGroup?.children.length || 0;
 
@@ -64,10 +75,11 @@ function StoryQueue({ stories, selectedId, canManage, voting, onSelect, onNew, o
 
   function storyRow(story: Story) {
     const index = stories.findIndex((candidate) => candidate.id === story.id);
+    const stretch = isStretchStory(story, stories);
     return <div className={`story-row${story.id === selectedId ? ' active' : ''}`} key={story.id}>
       <button className="story-row-main" type="button" onClick={() => onSelect(story.id)}>
         <span className="story-number">{story.id}</span>
-        <span className="story-row-copy"><strong>{story.title}</strong><span>{story.type}{story.epicId ? ' · linked to epic' : ''}</span></span>
+        <span className="story-row-copy"><strong>{story.title}</strong><span>{story.type}{story.epicId ? ' · linked to epic' : ''}{stretch ? ' · Stretch' : ''}</span></span>
         <span className="story-score" aria-label={`${story.title}: team ${story.manual ?? 'not estimated'}, AI ${story.ai ?? 'not estimated'}`}><span className="story-score-item"><small>Team</small><span className={`score-pill ${story.manual === null ? 'empty' : 'manual'}`}>{story.manual ?? '—'}</span></span><span className="story-score-item"><small>AI</small><span className={`score-pill ${story.ai === null ? 'empty' : 'ai'}`}>{story.ai ?? '—'}</span></span></span>
       </button>
       {canManage ? <div className="story-row-actions"><button className="story-action-button" type="button" disabled={voting} onClick={() => onEdit(story)} aria-label={`Edit ${story.title}`}><AppIcon name="pencil" size={13} /></button><button className="story-action-button" type="button" disabled={voting || index <= 0} onClick={() => onMove(story.id, -1)} aria-label={`Move ${story.title} up`}><AppIcon name="arrowUp" size={13} /></button><button className="story-action-button" type="button" disabled={voting || index >= stories.length - 1} onClick={() => onMove(story.id, 1)} aria-label={`Move ${story.title} down`}><AppIcon name="arrowDown" size={13} /></button>{story.manual !== null ? <button className="story-action-button" type="button" disabled={voting} onClick={() => onRevote(story)} aria-label={`Revote ${story.title}`}><AppIcon name="refresh" size={13} /></button> : null}<button className="story-action-button danger-action" type="button" disabled={voting || stories.length <= 1} onClick={() => onDelete(story)} aria-label={`Delete ${story.title}`}><AppIcon name="trash" size={13} /></button></div> : null}
@@ -77,11 +89,17 @@ function StoryQueue({ stories, selectedId, canManage, voting, onSelect, onNew, o
   const visibleGroups = focusedEpicId ? groups.filter((group) => group.epic?.id === focusedEpicId || group.key === 'unassigned') : groups;
   const estimableCount = stories.filter((story) => story.type !== 'Epic').length;
   const estimatedCount = stories.filter((story) => story.type !== 'Epic' && story.manual !== null).length;
+  const commitment = useMemo(() => stories.reduce((totals, story) => {
+    if (story.type === 'Epic' || story.manual === null) return totals;
+    const key = isStretchStory(story, stories) ? 'stretch' : 'committed';
+    totals[key] += story.manual;
+    return totals;
+  }, { committed: 0, stretch: 0 }), [stories]);
 
   return <section className="card queue-card">
-    <div className="queue-header"><div><h2>Story queue</h2><p>{estimableCount} {estimableCount === 1 ? 'story' : 'stories'} · {estimatedCount} estimated</p></div>{canManage ? <div className="queue-header-actions"><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew()}><AppIcon name="plus" size={13} /> Story</button><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew('Epic')}><AppIcon name="plus" size={13} /> Epic</button><button className="outline-button import-button" type="button" disabled={voting} onClick={onImport}><AppIcon name="upload" size={13} /> Import</button></div> : null}</div>
-    {epics.length ? <div className="epic-selector"><span className={`epic-selector-mark${focusedTotal > 0 && focusedDone === focusedTotal ? ' is-complete' : ''}`} aria-hidden="true"><AppIcon name={focusedTotal > 0 && focusedDone === focusedTotal ? 'check' : 'clock'} size={15} /></span><div className="epic-selector-copy"><span>Epic needing work</span><div className="epic-selector-select-row"><select value={focusedEpicId} onChange={(event) => selectEpic(event.target.value)} aria-label="Epic needing work">{epics.map((epic) => { const children = epicGroups.find((group) => group.epic.id === epic.id)?.children || []; const done = children.filter((story) => story.manual !== null).length; return <option value={epic.id} key={epic.id}>{epic.title} · {done}/{children.length} done</option>; })}</select></div></div><span className="epic-selector-progress">{focusedDone}/{focusedTotal}</span><span className="epic-selector-status">{focusedTotal > 0 && focusedDone === focusedTotal ? 'Done' : focusedTotal ? 'In progress' : 'No stories'}</span></div> : null}
-    <div className="story-queues">{visibleGroups.map((group) => { const storyCount = group.children.length; const estimated = group.children.filter((story) => story.manual !== null).length; return group.epic ? <div className="story-queue-group" key={group.key}><div className="story-queue-group-heading"><div><span className="queue-group-icon"><AppIcon name="briefcase" size={14} /></span><span><strong>{group.label}</strong><small>Epic · {storyCount} linked {storyCount === 1 ? 'story' : 'stories'}</small></span></div><div className="story-queue-group-heading-actions"><span className="queue-group-count">{estimated}/{storyCount}</span>{canManage ? <><button className="story-action-button" type="button" disabled={voting} onClick={() => onEdit(group.epic!)} aria-label={`Edit ${group.label}`}><AppIcon name="pencil" size={13} /></button><button className="story-action-button danger-action" type="button" disabled={voting || stories.length <= 1} onClick={() => onDelete(group.epic!)} aria-label={`Delete ${group.label}`}><AppIcon name="trash" size={13} /></button></> : null}</div></div><div className="story-list">{group.children.length ? group.children.map(storyRow) : <p className="empty-manager">No stories linked to this epic yet.</p>}</div></div> : <div className="story-list" key={group.key}>{group.children.map(storyRow)}</div>; })}</div>
+    <div className="queue-header"><div><h2>Story queue</h2><p>{estimableCount} {estimableCount === 1 ? 'story' : 'stories'} · {estimatedCount} estimated</p><p className="queue-commitment">Committed to <strong>{formatStoryPoints(commitment.committed)} SPs</strong> / <strong>{formatStoryPoints(commitment.stretch)} SPs</strong> stretch</p></div>{canManage ? <div className="queue-header-actions"><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew()}><AppIcon name="plus" size={13} /> Story</button><button className="outline-button import-button" type="button" disabled={voting} onClick={() => onNew('Epic')}><AppIcon name="plus" size={13} /> Epic</button><button className="outline-button import-button" type="button" disabled={voting} onClick={onImport}><AppIcon name="upload" size={13} /> Import</button></div> : null}</div>
+    {focusedEpic ? <div className="epic-selector"><span className={`epic-selector-mark${focusedTotal > 0 && focusedDone === focusedTotal ? ' is-complete' : ''}`} aria-hidden="true"><AppIcon name={focusedTotal > 0 && focusedDone === focusedTotal ? 'check' : 'clock'} size={15} /></span><div className="epic-selector-copy"><span>Epic needing work{focusedEpic.stretch ? ' · Stretch' : ''}</span><div className="epic-selector-select-row"><EpicPicker epics={epics} value={focusedEpicId} onChange={selectEpic} ariaLabel="Epic needing work" optionMeta={(epic) => { const children = epicGroups.find((group) => group.epic.id === epic.id)?.children || []; return `${children.filter((story) => story.manual !== null).length}/${children.length} done`; }} />{canManage ? <div className="epic-selector-actions"><button className="story-action-button" type="button" disabled={voting} onClick={() => onEdit(focusedEpic)} aria-label={`Edit ${focusedEpic.title}`}><AppIcon name="pencil" size={13} /></button><button className="story-action-button danger-action" type="button" disabled={voting || stories.length <= 1} onClick={() => onDelete(focusedEpic)} aria-label={`Delete ${focusedEpic.title}`}><AppIcon name="trash" size={13} /></button></div> : null}</div></div><span className="epic-selector-progress">{focusedDone}/{focusedTotal}</span><span className="epic-selector-status">{focusedTotal > 0 && focusedDone === focusedTotal ? 'Done' : focusedTotal ? 'In progress' : 'No stories'}</span></div> : null}
+    <div className="story-queues">{visibleGroups.map((group) => group.epic ? <div className="story-queue-group" key={group.key}><div className="story-list">{group.children.length ? group.children.map(storyRow) : <p className="empty-manager">No stories linked to this epic yet.</p>}</div></div> : <div className="story-list" key={group.key}>{group.children.map(storyRow)}</div>)}</div>
     <div className="queue-footer"><span className="icon"><AppIcon name="clock" size={14} /></span>{voting ? 'Queue actions are paused while the round is live.' : 'Select a story to estimate, edit, reorder, or import more work.'}</div>
   </section>;
 }

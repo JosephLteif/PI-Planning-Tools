@@ -101,6 +101,7 @@ export type Story = {
   ai: Estimate;
   aiEnabled: boolean;
   saved: boolean;
+  stretch: boolean;
   serviceLinks: Array<{ serviceId: string; allocation: number }>;
 };
 
