@@ -30,6 +30,7 @@ export function defaultRoomState(): RoomState {
       },
       members: [],
       sprints: [],
+      storySprintIds: {},
     },
     sequence: 'fibonacci',
     roomSettings: {

@@ -213,6 +213,24 @@ export function normalizeCapacity(source, roster = null) {
       members.push({ id, name: cleanText(member?.name, 'Planner', 120), office: 'beirut', trainStaffDevCapacityPct: 0.75 });
     }
   });
+  const sprints = Array.isArray(input.sprints) ? input.sprints.map((sprint) => ({
+    id: cleanId(sprint?.id),
+    name: cleanText(sprint?.name, 'Sprint', 120),
+    startDate: cleanText(sprint?.startDate, '', 20),
+    endDate: cleanText(sprint?.endDate, '', 20),
+    excludeFromTotal: sprint?.excludeFromTotal === true,
+    holidayDaysBeirut: Math.max(0, Math.min(366, Number(sprint?.holidayDaysBeirut) || 0)),
+    holidayDaysCyprus: Math.max(0, Math.min(366, Number(sprint?.holidayDaysCyprus) || 0)),
+    availabilityDays: sprint?.availabilityDays && typeof sprint.availabilityDays === 'object'
+      ? Object.fromEntries(Object.entries(sprint.availabilityDays).map(([id, days]) => [cleanId(id), Math.max(0, Math.min(366, Number(days) || 0))]).filter(([id]) => id))
+      : {},
+  })).filter((sprint) => sprint.id) : [];
+  const sprintIds = new Set(sprints.map((sprint) => sprint.id));
+  const storySprintIds = input.storySprintIds && typeof input.storySprintIds === 'object' && !Array.isArray(input.storySprintIds)
+    ? Object.fromEntries(Object.entries(input.storySprintIds)
+      .map(([storyId, sprintId]) => [cleanId(storyId), cleanId(sprintId)])
+      .filter(([storyId, sprintId]) => storyId && sprintId && sprintIds.has(sprintId)))
+    : {};
   return {
     defaults: {
       ceremoniesPct: percent(defaults.ceremoniesPct, 0.13),
@@ -221,18 +239,8 @@ export function normalizeCapacity(source, roster = null) {
       supportCapacityPct: percent(defaults.supportCapacityPct, 0.2),
     },
     members,
-    sprints: Array.isArray(input.sprints) ? input.sprints.map((sprint) => ({
-      id: cleanId(sprint?.id),
-      name: cleanText(sprint?.name, 'Sprint', 120),
-      startDate: cleanText(sprint?.startDate, '', 20),
-      endDate: cleanText(sprint?.endDate, '', 20),
-      excludeFromTotal: sprint?.excludeFromTotal === true,
-      holidayDaysBeirut: Math.max(0, Math.min(366, Number(sprint?.holidayDaysBeirut) || 0)),
-      holidayDaysCyprus: Math.max(0, Math.min(366, Number(sprint?.holidayDaysCyprus) || 0)),
-      availabilityDays: sprint?.availabilityDays && typeof sprint.availabilityDays === 'object'
-        ? Object.fromEntries(Object.entries(sprint.availabilityDays).map(([id, days]) => [cleanId(id), Math.max(0, Math.min(366, Number(days) || 0))]).filter(([id]) => id))
-        : {},
-    })).filter((sprint) => sprint.id) : [],
+    sprints,
+    storySprintIds,
   };
 }
 
@@ -294,7 +302,11 @@ export function normalizeStateInput(input, capacityRoster = null) {
     voteMode: roomSettingsSource.voteMode === 'open' ? 'open' : roomSettingsSource.voteMode === 'hidden' ? 'hidden' : roundMode,
     hideVoteCountUntilComplete: roomSettingsSource.hideVoteCountUntilComplete === true || hideVoteCountUntilComplete,
   };
-  const capacity = normalizeCapacity(source.capacity, capacityRoster);
+  const normalizedCapacity = normalizeCapacity(source.capacity, capacityRoster);
+  const storyIds = new Set(stories.filter((story) => story.type !== 'Epic').map((story) => story.id));
+  const storySprintIds = Object.fromEntries(Object.entries(normalizedCapacity.storySprintIds)
+    .filter(([storyId]) => storyIds.has(storyId)));
+  const capacity = { ...normalizedCapacity, storySprintIds };
 
   return {
     sequence: ALLOWED_SEQUENCES.has(source.sequence) ? source.sequence : 'fibonacci',

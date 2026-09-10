@@ -81,6 +81,7 @@ export type CapacityState = {
   };
   members: CapacityMember[];
   sprints: CapacitySprint[];
+  storySprintIds: Record<string, string>;
 };
 
 export type AdminUser = User & {

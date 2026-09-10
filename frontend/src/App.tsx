@@ -5,6 +5,7 @@ import { AppIcon } from './components/AppIcon';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
 import { CapacityPage } from './components/CapacityPage';
+import { DeliveryBoardPage } from './components/DeliveryBoardPage';
 import { EstimatesPage } from './components/EstimatesPage';
 import { ResourcesPage } from './components/ResourcesPage';
 import { RoomsPage } from './components/RoomsPage';
@@ -603,8 +604,10 @@ export default function App() {
         ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
           ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onUpdateMemberRole={handleUpdateTeamMemberRole} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
-          : view === 'settings'
+        : view === 'settings'
             ? <SettingsPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
+            : view === 'board'
+              ? <DeliveryBoardPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} />
             : view === 'capacity'
               ? <CapacityPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} />
               : view === 'resources'

@@ -3,7 +3,7 @@ import type { Room, User } from '../types';
 import { displayName, initials } from '../state';
 import { AppIcon, type AppIconName } from './AppIcon';
 
-export type ViewKey = 'estimates' | 'rooms' | 'team' | 'capacity' | 'resources' | 'settings' | 'admin';
+export type ViewKey = 'estimates' | 'board' | 'rooms' | 'team' | 'capacity' | 'resources' | 'settings' | 'admin';
 
 type AppShellProps = {
   user: User;
@@ -21,6 +21,7 @@ type AppShellProps = {
 
 const primaryNavigation: Array<{ key: ViewKey; label: string; icon: AppIconName }> = [
   { key: 'estimates', label: 'Estimates', icon: 'layout' },
+  { key: 'board', label: 'Delivery board', icon: 'kanban' },
   { key: 'capacity', label: 'Capacity', icon: 'gauge' },
   { key: 'resources', label: 'Resources', icon: 'boxes' },
   { key: 'settings', label: 'Room settings', icon: 'settings' },
@@ -111,7 +112,7 @@ export function AppShell({
       </aside>
       <main className="main-area">
         <div className="topbar">
-          <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Estimates' : view === 'settings' ? 'Room settings' : view[0].toUpperCase() + view.slice(1)}</span></div>
+          <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Estimates' : view === 'settings' ? 'Room settings' : view === 'board' ? 'Delivery board' : view[0].toUpperCase() + view.slice(1)}</span></div>
           <div className="topbar-actions">
             <div className="account-menu" ref={accountMenuRef}>
               <button className="account-menu-trigger" type="button" aria-label="Account menu" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((current) => !current)}>
