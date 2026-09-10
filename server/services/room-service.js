@@ -50,6 +50,7 @@ export async function readRoomState(db, roomId, userId) {
   const room = await db.prepare(`SELECT id, name, pi_label, owner_account_id, state_version, sequence_key, selected_story_key, vote_mode, ai_enabled, capacity_json
     FROM rooms WHERE id = ? LIMIT 1`).bind(roomId).first();
   if (!room) return { state: null, memberCount: 0 };
+  const aiVisible = Number(room.ai_enabled) !== 0;
 
   const [domainResult, serviceResult, storyResult, allocationResult, memberResult, voteHistoryResult, memberRosterResult, votingMemberResult, roomTeamMemberResult] = await Promise.all([
     db.prepare('SELECT id, name, sort_order FROM domains WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
@@ -113,8 +114,8 @@ export async function readRoomState(db, roomId, userId) {
       description: story.description || 'A new story ready for the team to shape and estimate together.',
       acceptance,
       manual: parseScore(story.manual_estimate),
-      ai: parseScore(story.ai_estimate),
-      aiEnabled: story.ai_enabled === 1,
+      ai: aiVisible ? parseScore(story.ai_estimate) : null,
+      aiEnabled: aiVisible && story.ai_enabled === 1,
       saved: story.saved === 1,
       stretch: Number(story.stretch) === 1,
       serviceLinks: linksByStory.get(story.story_key) || [],
@@ -163,7 +164,7 @@ export async function readRoomState(db, roomId, userId) {
       roundNumber: Number(currentRound.round_number) || 1,
       submittedCount: 0,
       votes: {},
-      cardFlipped: false,
+      cardFlipped: currentRound.phase === 'revealed',
       revealedAt: currentRound.revealed_at || null,
       timerStartedAt: currentRound.timer_started_at || (currentRound.timer_ends_at ? new Date(Date.parse(currentRound.timer_ends_at) - 5 * 60 * 1000).toISOString() : null),
       timerEndsAt: currentRound.timer_ends_at || null,
@@ -214,8 +215,8 @@ export async function readRoomState(db, roomId, userId) {
       .map((vote) => [vote.account_id, {
         name: vote.display_name || vote.email?.split('@')[0] || 'Planner',
         manual: parseScore(vote.manual_estimate),
-        ai: parseScore(vote.ai_estimate),
-        aiEnabled: vote.ai_enabled === 1,
+        ai: aiVisible ? parseScore(vote.ai_estimate) : null,
+        aiEnabled: aiVisible && vote.ai_enabled === 1,
       }]));
     round.players = roomMembers.map((member) => {
       const joined = activeParticipantIds.has(member.id);
@@ -231,8 +232,8 @@ export async function readRoomState(db, roomId, userId) {
         manualSubmitted: joined && manual !== null,
         aiSubmitted: joined && ai !== null,
         manual: canSeeAllVotes || member.id === userId ? manual : null,
-        ai: canSeeAllVotes || member.id === userId ? ai : null,
-        aiEnabled: vote?.ai_enabled === 1,
+        ai: aiVisible && (canSeeAllVotes || member.id === userId) ? ai : null,
+        aiEnabled: aiVisible && vote?.ai_enabled === 1,
       };
     });
   } else {
@@ -256,8 +257,8 @@ export async function readRoomState(db, roomId, userId) {
     voterId: vote.account_id,
     voterName: vote.display_name || vote.email?.split('@')[0] || 'Planner',
     manual: parseScore(vote.manual_estimate),
-    ai: parseScore(vote.ai_estimate),
-    aiEnabled: vote.ai_enabled === 1,
+    ai: aiVisible ? parseScore(vote.ai_estimate) : null,
+    aiEnabled: aiVisible && vote.ai_enabled === 1,
     updatedAt: vote.updated_at || null,
   }));
   let storedCapacity = {};

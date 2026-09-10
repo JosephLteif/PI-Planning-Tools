@@ -301,6 +301,7 @@ export async function handleApiRequest(request, env) {
     if (member?.role === 'observer') {
       return json({ error: 'Observers can view this room but cannot submit votes' }, 403);
     }
+    const roomSettings = await env.DB.prepare('SELECT ai_enabled FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
     const round = await env.DB.prepare(`SELECT phase FROM planning_rounds
       WHERE room_id = ? AND story_key = ? AND round_number = ? LIMIT 1`)
       .bind(roomId, storyId, roundNumber)
@@ -317,8 +318,8 @@ export async function handleApiRequest(request, env) {
     if (!story || story.type === 'Epic') return json({ error: 'Epics are estimated through their linked stories' }, 409);
 
     const manual = parseScore(input.manual);
-    const ai = parseScore(input.ai);
-    const aiEnabled = input.aiEnabled === true && ai !== null;
+    const ai = Number(roomSettings?.ai_enabled) !== 0 ? parseScore(input.ai) : null;
+    const aiEnabled = Number(roomSettings?.ai_enabled) !== 0 && input.aiEnabled === true && ai !== null;
     if (manual === null && ai === null) {
       await env.DB.prepare(`DELETE FROM votes WHERE room_id = ? AND story_key = ? AND round_number = ? AND account_id = ?`)
         .bind(roomId, storyId, roundNumber, user.id)

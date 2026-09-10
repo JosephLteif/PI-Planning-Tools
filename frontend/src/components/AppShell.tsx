@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Room, User } from '../types';
 import { displayName, initials } from '../state';
 import { AppIcon, type AppIconName } from './AppIcon';
@@ -41,6 +41,24 @@ export function AppShell({
 }: AppShellProps) {
   const room = rooms.find((candidate) => candidate.id === selectedRoomId);
   const name = displayName(user);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return undefined;
+    function closeMenu(event: MouseEvent) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) setAccountMenuOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setAccountMenuOpen(false);
+    }
+    document.addEventListener('mousedown', closeMenu);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeMenu);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [accountMenuOpen]);
 
   return (
     <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}`}>
@@ -89,16 +107,25 @@ export function AppShell({
         <div className="sidebar-user">
           <span className="avatar">{initials(name)}</span>
           <div className="sidebar-user-copy"><strong>{name}</strong><span>{user.role === 'admin' ? 'Workspace admin' : 'Planner'}</span></div>
-          <div className="sidebar-user-actions">
-            <button className="icon-button" type="button" onClick={() => void onSwitchAccount()} aria-label="Switch account" title="Switch account"><AppIcon name="arrowRightLeft" size={15} /></button>
-            <button className="icon-button pl-signout" type="button" onClick={() => void onSignOut()} aria-label="Sign out" title="Sign out"><AppIcon name="logOut" size={15} /></button>
-          </div>
         </div>
       </aside>
       <main className="main-area">
         <div className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Estimates' : view === 'settings' ? 'Room settings' : view[0].toUpperCase() + view.slice(1)}</span></div>
-          <div className="topbar-actions"><span className="pl-topbar-user">{name}</span><button className="outline-button" type="button" onClick={() => void onSwitchAccount()}><AppIcon name="arrowRightLeft" size={14} /> Switch account</button></div>
+          <div className="topbar-actions">
+            <div className="account-menu" ref={accountMenuRef}>
+              <button className="account-menu-trigger" type="button" aria-label="Account menu" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((current) => !current)}>
+                <span className="avatar">{initials(name)}</span>
+                <span className="account-menu-name">{name}</span>
+                <AppIcon name="chevronDown" size={14} />
+              </button>
+              {accountMenuOpen ? <div className="account-menu-popover" role="menu">
+                <div className="account-menu-summary"><strong>{name}</strong><span>{user.role === 'admin' ? 'Workspace admin' : 'Planner'}</span></div>
+                <button className="account-menu-action" type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void onSwitchAccount(); }}><AppIcon name="arrowRightLeft" size={15} /> Switch account</button>
+                <button className="account-menu-action danger" type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void onSignOut(); }}><AppIcon name="logOut" size={15} /> Log out</button>
+              </div> : null}
+            </div>
+          </div>
         </div>
         <div className="main-content">{children}</div>
       </main>

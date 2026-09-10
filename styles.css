@@ -4682,6 +4682,26 @@ html[data-theme='dark'] .modal-epic-picker {
   gap: 8px;
 }
 
+.capacity-member-filter {
+  display: grid;
+  min-width: 170px;
+  gap: 5px;
+}
+
+.capacity-member-filter > span {
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.capacity-member-filter .modal-input {
+  min-width: 170px;
+  padding: 7px 9px;
+  font-size: 10px;
+}
+
 .capacity-member-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150px 150px;
@@ -4712,6 +4732,54 @@ html[data-theme='dark'] .modal-epic-picker {
 
 .capacity-sprint-card {
   margin-bottom: 14px;
+}
+
+.capacity-sprint-selector {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.capacity-sprint-selector-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.capacity-sprint-selector-copy strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.capacity-sprint-selector-copy > span {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.capacity-sprint-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.capacity-sprint-tag {
+  padding: 7px 11px;
+  color: var(--ink-muted);
+  background: var(--canvas);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.capacity-sprint-tag:hover,
+.capacity-sprint-tag.active {
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-color: #cddcff;
 }
 
 .capacity-sprint-fields {
@@ -4955,6 +5023,25 @@ html[data-theme='dark'] .modal-epic-picker {
   .capacity-members-card,
   .capacity-sprint-card {
     padding: 18px;
+  }
+
+  .capacity-member-filter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .capacity-member-filter .modal-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .capacity-members-card .section-heading {
+    display: grid;
+    align-items: start;
+  }
+
+  .capacity-sprint-selector {
+    padding: 13px;
   }
 
   .capacity-member-row,

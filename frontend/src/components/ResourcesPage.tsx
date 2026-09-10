@@ -164,11 +164,13 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
   const [serviceName, setServiceName] = useState('');
   const [serviceDomain, setServiceDomain] = useState('');
   const [editingEpic, setEditingEpic] = useState<Story | null>(null);
-  const estimateSource: EstimateSource = estimateView === 'ai' ? 'ai' : 'team';
+  const aiEnabled = state.roomSettings.aiEnabled;
+  const visibleEstimateView: EstimateView = aiEnabled ? estimateView : 'team';
+  const estimateSource: EstimateSource = visibleEstimateView === 'ai' ? 'ai' : 'team';
   const allocationTab: ResourceTab = tab === 'catalog' ? 'service' : tab;
   const rows = useMemo(() => allocationRows(state, allocationTab, estimateSource), [allocationTab, estimateSource, state]);
-  const comparisonRows = useMemo(() => comparisonAllocationRows(state, allocationTab), [allocationTab, state]);
-  const epicRows = useMemo(() => epicResourceRows(state, estimateView), [state, estimateView]);
+  const comparisonRows = useMemo(() => aiEnabled ? comparisonAllocationRows(state, allocationTab) : [], [aiEnabled, allocationTab, state]);
+  const epicRows = useMemo(() => epicResourceRows(state, visibleEstimateView), [state, visibleEstimateView]);
   const epicSearchOptions = useMemo<EpicSearchOption[]>(() => epicRows.map((row) => {
     const epic = state.stories.find((story) => story.id === row.id && story.type === 'Epic');
     const links = epic ? epic.serviceLinks : row.stories.flatMap((story) => effectiveServiceLinks(state, story));
@@ -189,7 +191,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
   }, [epicRows, epicSearch, epicSearchOptions]);
   const estimatedStories = state.stories.filter((story) => story.type !== 'Epic' && estimateValue(story, estimateSource) !== null);
   const total = estimatedStories.reduce((sum, story) => sum + (estimateValue(story, estimateSource) || 0), 0);
-  const pairedStories = useMemo(() => comparisonStories(state), [state]);
+  const pairedStories = useMemo(() => aiEnabled ? comparisonStories(state) : [], [aiEnabled, state]);
   const comparisonTotals = useMemo(() => pairedStories.reduce((totals, story) => ({
     team: totals.team + (story.manual || 0),
     ai: totals.ai + (story.ai || 0),
@@ -206,10 +208,10 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
     }
     return totals;
   }, { team: 0, ai: 0, teamCount: 0, aiCount: 0 }), [state.stories]);
-  const displayRows = useMemo(() => estimateView === 'gain'
+  const displayRows = useMemo(() => visibleEstimateView === 'gain'
     ? comparisonRows.map((row) => ({ ...row, points: row.teamPoints }))
-    : rows.map((row) => ({ ...row, teamPoints: null, aiPoints: null })), [comparisonRows, estimateView, rows]);
-  const displayTotal = estimateView === 'gain' ? comparisonTotals.team : total;
+    : rows.map((row) => ({ ...row, teamPoints: null, aiPoints: null })), [comparisonRows, rows, visibleEstimateView]);
+  const displayTotal = visibleEstimateView === 'gain' ? comparisonTotals.team : total;
 
   async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -283,17 +285,50 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         </div>
       </div>
 
+      {tab !== 'catalog' ? <div className={`allocation-impact-summary allocation-impact-summary-top${aiEnabled ? '' : ' team-only'}`} aria-label={aiEnabled ? 'Overall AI gain' : 'Team estimate summary'}>
+        {aiEnabled ? <div className={`allocation-impact-item allocation-impact-primary ${gainTone(comparisonTotals.team, comparisonTotals.ai)}`}>
+          <span>Overall AI gain</span>
+          <strong>{formatGain(comparisonTotals.team, comparisonTotals.ai)}</strong>
+          <small>{gainDescription(comparisonTotals.team, comparisonTotals.ai, pairedStories.length)}</small>
+        </div> : null}
+        <div className="allocation-impact-item">
+          <span>Team estimate</span>
+          <strong>{formatEstimate(aiEnabled ? (pairedStories.length ? comparisonTotals.team : null) : total)}</strong>
+          <small>{aiEnabled ? 'paired story points' : `${estimatedStories.length} saved story points`}</small>
+        </div>
+        {aiEnabled ? <div className="allocation-impact-item">
+          <span>AI estimate</span>
+          <strong>{formatEstimate(pairedStories.length ? comparisonTotals.ai : null)}</strong>
+          <small>same stories as team</small>
+        </div> : null}
+        <div className="allocation-impact-item allocation-impact-stretch">
+          <span>Stretch SPs</span>
+          <strong>{formatEstimate(stretchTotals.team)}</strong>
+          <small>{stretchTotals.teamCount} stretch {stretchTotals.teamCount === 1 ? 'story' : 'stories'}</small>
+        </div>
+        {aiEnabled ? <div className="allocation-impact-item allocation-impact-stretch">
+          <span>AI Stretch SPs</span>
+          <strong>{formatEstimate(stretchTotals.ai)}</strong>
+          <small>{stretchTotals.aiCount} stretch {stretchTotals.aiCount === 1 ? 'story' : 'stories'} with AI</small>
+        </div> : null}
+        {aiEnabled ? <div className="allocation-impact-item">
+          <span>Compared</span>
+          <strong>{pairedStories.length}</strong>
+          <small>{pairedStories.length === 1 ? 'story with both estimates' : 'stories with both estimates'}</small>
+        </div> : null}
+      </div> : null}
+
       <section className="card allocation-card pl-allocation-card">
         <div className="lower-card-heading">
           <div>
             <h2>{tab === 'catalog' ? 'Resource catalog' : 'Resource allocation'}</h2>
-            <p>{tab === 'catalog' ? 'Manage domains and services used by the planning room.' : estimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories.`}</p>
+            <p>{tab === 'catalog' ? 'Manage domains and services used by the planning room.' : visibleEstimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories.`}</p>
           </div>
           <div className="allocation-heading-controls">
-            {tab !== 'catalog' ? <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
+            {tab !== 'catalog' && aiEnabled ? <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
               <span className="allocation-estimate-toggle-label">Show</span>
               {(['team', 'ai', 'gain'] as const).map((view) => (
-                <button key={view} className={`allocation-estimate-option${estimateView === view ? ' active' : ''}`} type="button" aria-pressed={estimateView === view} onClick={() => setEstimateView(view)}>
+                <button key={view} className={`allocation-estimate-option${visibleEstimateView === view ? ' active' : ''}`} type="button" aria-pressed={visibleEstimateView === view} onClick={() => setEstimateView(view)}>
                   {view === 'team' ? 'Team' : view === 'ai' ? 'AI' : 'AI gain'}
                 </button>
               ))}
@@ -309,34 +344,6 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         </div>
 
         {tab !== 'catalog' ? <>
-        <div className="allocation-impact-summary" aria-label="Overall AI gain">
-          <div className={`allocation-impact-item allocation-impact-primary ${gainTone(comparisonTotals.team, comparisonTotals.ai)}`}>
-            <span>Overall AI gain</span>
-            <strong>{formatGain(comparisonTotals.team, comparisonTotals.ai)}</strong>
-            <small>{gainDescription(comparisonTotals.team, comparisonTotals.ai, pairedStories.length)}</small>
-          </div>
-          <div className="allocation-impact-item">
-            <span>Team estimate</span>
-            <strong>{formatEstimate(pairedStories.length ? comparisonTotals.team : null)}</strong>
-            <small>paired story points</small>
-          </div>
-          <div className="allocation-impact-item">
-            <span>AI estimate</span>
-            <strong>{formatEstimate(pairedStories.length ? comparisonTotals.ai : null)}</strong>
-            <small>same stories as team</small>
-          </div>
-          <div className="allocation-impact-item allocation-impact-stretch">
-            <span>Stretch SPs</span>
-            <strong>{formatEstimate(stretchTotals.team)}</strong>
-            <small>{stretchTotals.aiCount ? `${formatEstimate(stretchTotals.ai)} AI stretch points` : 'No AI stretch estimates yet'}</small>
-          </div>
-          <div className="allocation-impact-item">
-            <span>Compared</span>
-            <strong>{pairedStories.length}</strong>
-            <small>{pairedStories.length === 1 ? 'story with both estimates' : 'stories with both estimates'}</small>
-          </div>
-        </div>
-
         <div className="allocation-breakdown">
           {tab === 'epic' ? (
             <div className="epic-resource-list">
@@ -353,10 +360,10 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                 const teamStories = row.stories.filter((story) => story.manual !== null);
                 const aiStories = row.stories.filter((story) => story.ai !== null);
                 const pairedEpicStories = row.stories.filter((story) => story.manual !== null && story.ai !== null);
-                const selectedStories = estimateView === 'team' ? teamStories : estimateView === 'ai' ? aiStories : pairedEpicStories;
-                const selectedLabel = estimateView === 'team' ? 'team' : estimateView === 'ai' ? 'AI' : 'paired';
-                const displayedTeamPoints = estimateView === 'gain' ? row.comparisonTeamPoints : row.teamPoints;
-                const displayedAiPoints = estimateView === 'gain' ? row.comparisonAiPoints : row.aiPoints;
+                const selectedStories = visibleEstimateView === 'team' ? teamStories : visibleEstimateView === 'ai' ? aiStories : pairedEpicStories;
+                const selectedLabel = visibleEstimateView === 'team' ? 'team' : visibleEstimateView === 'ai' ? 'AI' : 'paired';
+                const displayedTeamPoints = visibleEstimateView === 'gain' ? row.comparisonTeamPoints : row.teamPoints;
+                const displayedAiPoints = visibleEstimateView === 'gain' ? row.comparisonAiPoints : row.aiPoints;
                 const progress = row.stories.length ? (selectedStories.length / row.stories.length) * 100 : 0;
                 return (
                   <article className={`epic-resource-card${expanded ? ' expanded' : ''}`} key={row.id}>
@@ -365,7 +372,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                         <button className="epic-resource-toggle" type="button" aria-expanded={expanded} onClick={() => toggleEpic(row.id)}>
                           <span className="epic-resource-chevron" aria-hidden="true"><AppIcon name={expanded ? 'chevronDown' : 'chevronRight'} size={14} /></span>
                           <span>
-                            <span className="section-kicker">Epic</span>
+                            <span className="epic-resource-eyebrow"><span className="section-kicker">Epic</span>{epic?.stretch ? <span className="stretch-tag">Stretch</span> : null}</span>
                             <h3>{row.name}</h3>
                             <p>{row.stories.length} {row.stories.length === 1 ? 'individual story' : 'individual stories'} · click to {expanded ? 'collapse' : 'expand'}</p>
                           </span>
@@ -377,11 +384,11 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                       </div>
                     </div>
 
-                    <div className="epic-resource-metrics">
-                      <div className={estimateView === 'team' || estimateView === 'gain' ? 'selected' : ''}><span>Team estimate</span><strong>{formatEstimate(displayedTeamPoints)}</strong><small>{estimateView === 'gain' ? 'paired allocation · pts' : 'saved allocation · pts'}</small></div>
-                      <div className={estimateView === 'ai' || estimateView === 'gain' ? 'selected' : ''}><span>AI estimate</span><strong>{formatEstimate(displayedAiPoints)}</strong><small>{estimateView === 'gain' ? `${pairedEpicStories.length} paired ${pairedEpicStories.length === 1 ? 'story' : 'stories'}` : aiStories.length ? `${aiStories.length} ${aiStories.length === 1 ? 'story' : 'stories'} with AI` : 'No AI estimates yet'}</small></div>
-                      <div className={`ai-gain-metric ${gainTone(row.comparisonTeamPoints, row.comparisonAiPoints)}`}><span>AI gain</span><strong>{formatGain(row.comparisonTeamPoints, row.comparisonAiPoints)}</strong><small>{gainDescription(row.comparisonTeamPoints, row.comparisonAiPoints, pairedEpicStories.length)}</small></div>
-                      <div><span>Stories</span><strong>{selectedStories.length}</strong><small>{estimateView === 'gain' ? 'with both estimates' : `${row.stories.length} linked to epic`}</small></div>
+                    <div className={`epic-resource-metrics${aiEnabled ? '' : ' team-only'}`}>
+                      <div className={visibleEstimateView === 'team' || visibleEstimateView === 'gain' ? 'selected' : ''}><span>Team estimate</span><strong>{formatEstimate(displayedTeamPoints)}</strong><small>{visibleEstimateView === 'gain' ? 'paired allocation · pts' : 'saved allocation · pts'}</small></div>
+                      {aiEnabled ? <div className={visibleEstimateView === 'ai' || visibleEstimateView === 'gain' ? 'selected' : ''}><span>AI estimate</span><strong>{formatEstimate(displayedAiPoints)}</strong><small>{visibleEstimateView === 'gain' ? `${pairedEpicStories.length} paired ${pairedEpicStories.length === 1 ? 'story' : 'stories'}` : aiStories.length ? `${aiStories.length} ${aiStories.length === 1 ? 'story' : 'stories'} with AI` : 'No AI estimates yet'}</small></div> : null}
+                      {aiEnabled ? <div className={`ai-gain-metric ${gainTone(row.comparisonTeamPoints, row.comparisonAiPoints)}`}><span>AI gain</span><strong>{formatGain(row.comparisonTeamPoints, row.comparisonAiPoints)}</strong><small>{gainDescription(row.comparisonTeamPoints, row.comparisonAiPoints, pairedEpicStories.length)}</small></div> : null}
+                      <div><span>Stories</span><strong>{selectedStories.length}</strong><small>{visibleEstimateView === 'gain' ? 'with both estimates' : `${row.stories.length} linked to epic`}</small></div>
                     </div>
 
                     <div className="epic-resource-progress-bar" aria-label={`${selectedStories.length} of ${row.stories.length} stories have ${selectedLabel} estimates`}>
@@ -400,8 +407,8 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                                   <span>{story.id}{story.saved ? ' · Saved' : ' · Not saved'}</span>
                                 </div>
                                 <div className="epic-story-estimates">
-                                  <span className={`epic-story-estimate${estimateView === 'team' || estimateView === 'gain' ? ' selected' : ''}`}><small>Team</small><strong>{formatEstimate(story.manual)}</strong></span>
-                                  <span className={`epic-story-estimate${estimateView === 'ai' || estimateView === 'gain' ? ' selected' : ''}`}><small>AI</small><strong>{formatEstimate(story.ai)}</strong></span>
+                                  <span className={`epic-story-estimate${visibleEstimateView === 'team' || visibleEstimateView === 'gain' ? ' selected' : ''}`}><small>Team</small><strong>{formatEstimate(story.manual)}</strong></span>
+                                  {aiEnabled ? <span className={`epic-story-estimate${visibleEstimateView === 'ai' || visibleEstimateView === 'gain' ? ' selected' : ''}`}><small>AI</small><strong>{formatEstimate(story.ai)}</strong></span> : null}
                                 </div>
                               </div>
                             )) : <p className="empty-manager">No stories are linked to this epic yet.</p>}
@@ -411,11 +418,11 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                     ) : null}
                   </article>
                 );
-              }) : <div className="empty-state"><h2>{epicSearch.trim() ? 'No matching epics' : 'No epic allocation data yet'}</h2><p>{epicSearch.trim() ? 'Try another name, domain, or product.' : `Link stories to an epic and add a ${estimateView === 'team' ? 'team' : estimateView === 'ai' ? 'AI' : 'team and AI'} estimate to see the breakdown here.`}</p></div>}
+              }) : <div className="empty-state"><h2>{epicSearch.trim() ? 'No matching epics' : 'No epic allocation data yet'}</h2><p>{epicSearch.trim() ? 'Try another name, domain, or product.' : `Link stories to an epic and add a ${visibleEstimateView === 'team' ? 'team' : visibleEstimateView === 'ai' ? 'AI' : 'team and AI'} estimate to see the breakdown here.`}</p></div>}
             </div>
           ) : (
             <div className="breakdown-list">
-              {displayRows.length ? displayRows.map((row) => estimateView === 'gain' ? (
+              {displayRows.length ? displayRows.map((row) => visibleEstimateView === 'gain' ? (
                 <div className={`breakdown-row ai-gain-row ${gainTone(row.teamPoints || 0, row.aiPoints || 0)}`} key={row.id}>
                   <div className="breakdown-row-top"><strong>{row.name}</strong><span className={`ai-gain-chip ${gainTone(row.teamPoints || 0, row.aiPoints || 0)}`}>{formatGain(row.teamPoints || 0, row.aiPoints || 0)}</span></div>
                   <div className="breakdown-comparison-points"><span>Team {formatEstimate(row.teamPoints)}</span><span>AI {formatEstimate(row.aiPoints)}</span></div>
@@ -428,11 +435,11 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
                   <div className="breakdown-bar"><span style={{ width: `${displayTotal ? (row.points / displayTotal) * 100 : 0}%` }} /></div>
                   <div className="breakdown-row-foot">{displayTotal ? Math.round((row.points / displayTotal) * 100) : 0}% of saved points</div>
                 </div>
-              )) : <div className="empty-state"><h2>{estimateView === 'gain' ? 'No AI comparison data yet' : 'No allocation data yet'}</h2><p>{estimateView === 'gain' ? 'Add both a team and AI estimate to a story to see its gain here.' : 'Save a story estimate to see its resource roll-up here.'}</p></div>}
+              )) : <div className="empty-state"><h2>{visibleEstimateView === 'gain' ? 'No AI comparison data yet' : 'No allocation data yet'}</h2><p>{visibleEstimateView === 'gain' ? 'Add both a team and AI estimate to a story to see its gain here.' : 'Save a story estimate to see its resource roll-up here.'}</p></div>}
             </div>
           )}
         </div>
-        <p className="allocation-note">Use Team / AI / AI gain to switch every allocation tab. AI gain compares only stories with both estimates and uses the same service allocation weighting. Expanded epics always show both estimates for each individual story.</p>
+        <p className="allocation-note">{aiEnabled ? 'Use Team / AI / AI gain to switch every allocation tab. AI gain compares only stories with both estimates and uses the same service allocation weighting. Expanded epics always show both estimates for each individual story.' : 'Resource allocation currently shows saved team story points. Turn on the optional room comparison to add a second estimate view.'}</p>
         </> : null}
       </section>
 

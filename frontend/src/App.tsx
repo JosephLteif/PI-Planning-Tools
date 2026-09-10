@@ -260,7 +260,8 @@ export default function App() {
     if (!selectedRoomId || !roomPayload?.state) return;
     setSaving(true);
     try {
-      await submitVote(selectedRoomId, roomPayload.state.round.storyId || roomPayload.state.selectedStoryId || '', roomPayload.state.round.roundNumber, manual, ai, ai !== null);
+      const aiVote = roomPayload.state.roomSettings.aiEnabled ? ai : null;
+      await submitVote(selectedRoomId, roomPayload.state.round.storyId || roomPayload.state.selectedStoryId || '', roomPayload.state.round.roundNumber, manual, aiVote, aiVote !== null);
       await refreshRoom(selectedRoomId);
       setNotice('Vote submitted');
     } catch (error) {

@@ -107,11 +107,16 @@ function SprintEditorModal({ sprint, saving, onClose, onSave }: { sprint: Capaci
 
 export function CapacityPage({ room, state, user, saving, readOnly = false, onSave }: CapacityPageProps) {
   const [editingSprint, setEditingSprint] = useState<CapacitySprint | null>(null);
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [selectedSprintId, setSelectedSprintId] = useState('');
   const canEdit = !readOnly && (room.role === 'owner' || room.role === 'admin' || user.role === 'admin');
   const capacity = state.capacity;
   const members = capacity.members;
   const included = capacity.sprints.filter((sprint) => !sprint.excludeFromTotal);
   const total = included.reduce((sum, sprint) => sum + members.reduce((inner, member) => inner + sprintCapacity(member, sprint, capacity.defaults).total, 0), 0);
+  const activeMemberId = members.some((member) => member.id === selectedMemberId) ? selectedMemberId : '';
+  const visibleMembers = activeMemberId ? members.filter((member) => member.id === activeMemberId) : members;
+  const selectedSprint = capacity.sprints.find((sprint) => sprint.id === selectedSprintId) || capacity.sprints[0] || null;
 
   function saveCapacity(update: (next: RoomState) => void) {
     const next = cloneState(state);
@@ -177,11 +182,11 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
         <section className="card capacity-members-card pl-capacity-card">
           <div className="section-heading">
             <div><p className="section-kicker">Team assumptions</p><h2>Members and offices</h2></div>
-            <span className="section-count">{members.length}</span>
+            <label className="capacity-member-filter"><span>Member</span><select className="modal-input" value={activeMemberId} onChange={(event) => setSelectedMemberId(event.target.value)} aria-label="Filter capacity by member"><option value="">All members</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
           </div>
-          <p className="settings-copy">Set each member’s office and base train/staff development capacity. Sprint availability is editable directly on each sprint.</p>
+          <p className="settings-copy">Set each member’s office and base train/staff development capacity. Use the member filter to focus the sprint details below.</p>
           <div className="capacity-member-list">
-            {members.map((member) => (
+            {visibleMembers.map((member) => (
               <div className="capacity-member-row" key={member.id}>
                 <div><strong>{member.name}</strong><small>Derived dev: {Math.round(Math.max(0, member.trainStaffDevCapacityPct - capacity.defaults.ceremoniesPct) * 100)}%</small></div>
                 <label>
@@ -201,40 +206,47 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
         </section>
       </section>
 
-      {capacity.sprints.length ? capacity.sprints.map((sprint) => (
-        <section className="card capacity-sprint-card pl-capacity-card" key={sprint.id}>
+      {capacity.sprints.length ? <div className="capacity-sprint-selector">
+        <div className="capacity-sprint-selector-copy"><p className="section-kicker">Sprint focus</p><strong>Select a sprint</strong><span>Choose a sprint tag to view its capacity and availability.</span></div>
+        <div className="capacity-sprint-tags" role="tablist" aria-label="Select sprint">
+          {capacity.sprints.map((sprint) => <button className={`capacity-sprint-tag${selectedSprint?.id === sprint.id ? ' active' : ''}`} key={sprint.id} type="button" role="tab" aria-selected={selectedSprint?.id === sprint.id} onClick={() => setSelectedSprintId(sprint.id)}>{sprint.name}</button>)}
+        </div>
+      </div> : null}
+
+      {selectedSprint ? (
+        <section className="card capacity-sprint-card pl-capacity-card" key={selectedSprint.id}>
           <div className="section-heading">
             <div>
               <p className="section-kicker">Sprint</p>
-              <h2>{sprint.name}</h2>
-              <p className="settings-copy">{sprint.startDate || 'Start date'} → {sprint.endDate || 'End date'} · {businessDays(sprint.startDate, sprint.endDate)} weekdays</p>
+              <h2>{selectedSprint.name}</h2>
+              <p className="settings-copy">{selectedSprint.startDate || 'Start date'} → {selectedSprint.endDate || 'End date'} · {businessDays(selectedSprint.startDate, selectedSprint.endDate)} weekdays</p>
             </div>
-            {canEdit ? <div className="footer-actions"><button className="outline-button" type="button" disabled={saving} onClick={() => setEditingSprint(sprint)}>Edit</button><button className="outline-button" type="button" disabled={saving} onClick={() => saveCapacity((next) => { next.capacity.sprints = next.capacity.sprints.filter((item) => item.id !== sprint.id); })}>Remove</button></div> : null}
+            {canEdit ? <div className="footer-actions"><button className="outline-button" type="button" disabled={saving} onClick={() => setEditingSprint(selectedSprint)}>Edit</button><button className="outline-button" type="button" disabled={saving} onClick={() => saveCapacity((next) => { next.capacity.sprints = next.capacity.sprints.filter((item) => item.id !== selectedSprint.id); })}>Remove</button></div> : null}
           </div>
 
           <div className="capacity-summary-grid">
             {(['feature', 'codeReview', 'support', 'total'] as const).map((key) => (
-              <div key={key}><span>{key === 'codeReview' ? 'Code review' : key === 'feature' ? 'Features' : key === 'support' ? 'Support / CM' : 'Total capacity'}</span><strong>{members.reduce((sum, member) => sum + sprintCapacity(member, sprint, capacity.defaults)[key], 0).toFixed(1)}</strong></div>
+              <div key={key}><span>{key === 'codeReview' ? 'Code review' : key === 'feature' ? 'Features' : key === 'support' ? 'Support / CM' : 'Total capacity'}</span><strong>{visibleMembers.reduce((sum, member) => sum + sprintCapacity(member, selectedSprint, capacity.defaults)[key], 0).toFixed(1)}</strong></div>
             ))}
           </div>
 
-          {members.length ? <div className="capacity-sprint-people">
+          {visibleMembers.length ? <div className="capacity-sprint-people">
             <div className="capacity-sprint-people-heading">
               <div><strong>People & availability</strong><span>Edit available days directly for this sprint.</span></div>
-              <span>{members.length} {members.length === 1 ? 'person' : 'people'}</span>
+              <span>{visibleMembers.length} {visibleMembers.length === 1 ? 'person' : 'people'}</span>
             </div>
             <div className="capacity-sprint-person-list">
               <div className="capacity-sprint-person-header" aria-hidden="true"><span>Person</span><span>Office</span><span>Dev capacity</span><span>Available days</span></div>
-              {members.map((member) => {
-                const details = sprintCapacity(member, sprint, capacity.defaults);
-                const defaultAvailability = officeWorkdays(member, sprint);
-                const hasOverride = Object.prototype.hasOwnProperty.call(sprint.availabilityDays, member.id);
+              {visibleMembers.map((member) => {
+                const details = sprintCapacity(member, selectedSprint, capacity.defaults);
+                const defaultAvailability = officeWorkdays(member, selectedSprint);
+                const hasOverride = Object.prototype.hasOwnProperty.call(selectedSprint.availabilityDays, member.id);
                 return <div className="capacity-sprint-person-row" key={member.id}>
                   <div className="capacity-sprint-person-name"><strong>{member.name}</strong><small>{hasOverride ? 'Manual override' : `Office weekdays · ${defaultAvailability} days`}</small></div>
                   <span className="capacity-sprint-person-office">{member.office === 'cyprus' ? 'Cyprus' : 'Beirut'}</span>
                   <div className="capacity-sprint-person-dev"><strong>{Math.round(member.trainStaffDevCapacityPct * 100)}%</strong><small>Derived {Math.round(details.devPct * 100)}%</small></div>
                   <label className="capacity-sprint-availability-field">
-                    <span className="capacity-sprint-availability-input"><input key={`${member.id}-${sprint.availabilityDays[member.id] ?? `calculated-${details.availability}`}`} className="compact-input" type="number" min="0" max="366" step="1" defaultValue={details.availability} disabled={!canEdit || saving} onBlur={(event) => updateSprintAvailability(sprint.id, member.id, event.target.value)} aria-label={`${member.name} available days for ${sprint.name}`} /><span>days</span></span>
+                    <span className="capacity-sprint-availability-input"><input key={`${member.id}-${selectedSprint.availabilityDays[member.id] ?? `calculated-${details.availability}`}`} className="compact-input" type="number" min="0" max="366" step="1" defaultValue={details.availability} disabled={!canEdit || saving} onBlur={(event) => updateSprintAvailability(selectedSprint.id, member.id, event.target.value)} aria-label={`${member.name} available days for ${selectedSprint.name}`} /><span>days</span></span>
                     <small>{hasOverride ? 'override' : 'calculated'}</small>
                   </label>
                 </div>;
@@ -242,7 +254,7 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
             </div>
           </div> : null}
         </section>
-      )) : <section className="card empty-state capacity-empty-state"><span className="empty-state-icon"><AppIcon name="plus" size={22} /></span><h3>Add the first sprint</h3><p>Set sprint dates and holidays to see office-aware capacity totals.</p></section>}
+      ) : <section className="card empty-state capacity-empty-state"><span className="empty-state-icon"><AppIcon name="plus" size={22} /></span><h3>Add the first sprint</h3><p>Set sprint dates and holidays to see office-aware capacity totals.</p></section>}
 
       {editingSprint ? <SprintEditorModal sprint={editingSprint} saving={saving} onClose={() => setEditingSprint(null)} onSave={async (updated) => { const next = cloneState(state); next.capacity.sprints = next.capacity.sprints.map((sprint) => sprint.id === updated.id ? updated : sprint); await onSave(next); setEditingSprint(null); }} /> : null}
     </div>

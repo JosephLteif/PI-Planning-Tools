@@ -14,6 +14,18 @@
 .pl-room-meta { padding: 0 12px; color: #8190a6; font-size: 10px; }
 .pl-signout { margin-left: auto; color: #91a0b5; }
 .pl-topbar-user { color: var(--ink-muted); font-size: 11px; font-weight: 600; }
+.account-menu { position: relative; }
+.account-menu-trigger { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 10px; font-size: 11px; font-weight: 700; }
+.account-menu-trigger:hover, .account-menu-trigger[aria-expanded='true'] { background: var(--surface); border-color: var(--line); }
+.account-menu-trigger .avatar { width: 32px; height: 32px; }
+.account-menu-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu-popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; display: grid; min-width: 210px; gap: 4px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 16px 38px rgba(26, 40, 64, .16); }
+.account-menu-summary { display: grid; gap: 3px; padding: 8px 9px 10px; border-bottom: 1px solid var(--line); }
+.account-menu-summary strong { color: var(--ink); font-size: 11px; }
+.account-menu-summary span { color: var(--ink-soft); font-size: 10px; }
+.account-menu-action { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px; color: var(--ink); text-align: left; background: transparent; border: 0; border-radius: 7px; font-size: 10px; font-weight: 700; }
+.account-menu-action:hover { background: var(--canvas); }
+.account-menu-action.danger { color: var(--coral); }
 .story-index { display: grid; width: 29px; height: 29px; color: var(--blue); background: var(--blue-soft); border-radius: 8px; place-items: center; font-size: 9px; font-weight: 800; }
 .story-row-copy { display: grid; gap: 3px; min-width: 0; }
 .story-row-copy strong, .story-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -21,11 +33,20 @@
 .story-row-copy small { color: var(--ink-soft); font-size: 9px; }
 .story-row-score { min-width: 24px; color: var(--ink); font-size: 14px; font-weight: 800; text-align: center; }
 .round-badge { padding: 5px 8px; color: var(--blue); background: var(--blue-soft); border-radius: 6px; font-size: 9px; font-weight: 800; }
+.round-badge.is-flipped { color: var(--green); background: #eaf8f2; }
+.session-gate { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 15px; align-items: center; margin-top: 24px; padding: 19px; background: #f8fafc; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
+.session-gate-icon { display: grid; width: 42px; height: 42px; color: var(--blue); background: var(--blue-soft); border-radius: 12px; place-items: center; }
+.session-gate h3 { margin: 4px 0 5px; font-size: 16px; letter-spacing: -.03em; }
+.session-gate p:not(.section-kicker) { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
+.round-next-epic-select { min-width: 150px; padding: 8px 25px 8px 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; font-size: 10px; font-weight: 700; }
+.round-next-copy { color: var(--ink-soft); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.estimate-fields.team-only { grid-template-columns: minmax(0, 1fr); }
 .pl-vote-summary { display: grid; gap: 6px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); }
 .pl-vote-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 9px 11px; background: #f8fafc; border-radius: 8px; font-size: 11px; }
 .pl-vote-person { display: grid; gap: 3px; min-width: 0; }
 .pl-vote-person span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pl-vote-estimates { display: grid; grid-template-columns: repeat(2, minmax(58px, auto)); gap: 12px; }
+.pl-vote-estimates.team-only { grid-template-columns: minmax(58px, auto); }
 .pl-vote-estimate { display: grid; gap: 2px; min-width: 0; text-align: right; }
 .pl-vote-estimate small { color: var(--ink-soft); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .pl-vote-estimate strong { font-family: 'Space Grotesk', sans-serif; font-size: 15px; }
@@ -60,7 +81,9 @@
 .allocation-estimate-toggle-label { padding: 0 5px; color: var(--ink-soft); font-size: 10px; font-weight: 700; }
 .allocation-estimate-option { padding: 7px 10px; color: var(--ink-soft); background: transparent; border: 0; border-radius: 6px; font-size: 10px; font-weight: 700; }
 .allocation-estimate-option:hover, .allocation-estimate-option.active { color: var(--ink); background: #fff; box-shadow: 0 2px 5px rgba(28, 45, 70, 0.08); }
-.allocation-impact-summary { display: grid; grid-template-columns: 1.35fr repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 15px; }
+.allocation-impact-summary { display: grid; grid-template-columns: 1.35fr repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 15px; }
+.allocation-impact-summary.team-only { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.allocation-impact-summary-top { margin: 0 0 18px; }
 .allocation-impact-item { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
 .allocation-impact-item span, .allocation-impact-item small { color: var(--ink-soft); font-size: 9px; font-weight: 700; }
 .allocation-impact-item strong { color: var(--ink); font-family: 'Space Grotesk', sans-serif; font-size: 18px; }
@@ -82,11 +105,14 @@
 .ai-gain-row.empty .breakdown-bar span { background: var(--line-strong); }
 .ai-gain-metric small { line-height: 1.35; }
 .epic-resource-title { min-width: 0; flex: 1; }
+.epic-resource-eyebrow { display: flex; align-items: center; gap: 7px; }
+.stretch-tag { display: inline-flex; align-items: center; padding: 3px 7px; color: #657c1d; background: #edf5cf; border: 1px solid #dce9ad; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .epic-resource-toggle { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 0; color: inherit; text-align: left; background: transparent; border: 0; cursor: pointer; }
 .epic-resource-toggle > span:last-child { display: block; min-width: 0; }
 .epic-resource-chevron { display: grid; flex: 0 0 auto; width: 20px; height: 20px; color: var(--blue); background: var(--blue-soft); border-radius: 6px; place-items: center; font-size: 17px; line-height: 1; }
 .epic-resource-toggle:hover h3 { color: var(--blue); }
 .epic-resource-metrics > div.selected { border-color: var(--blue); background: var(--blue-soft); }
+.epic-resource-metrics.team-only { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .epic-resource-details.epic-resource-story-details { grid-template-columns: minmax(0, 1fr); }
 .epic-resource-story > .epic-story-estimates { display: flex; align-items: center; flex: 0 0 auto; gap: 14px; }
 .epic-story-estimate { display: grid; min-width: 45px; gap: 3px; text-align: right; }
@@ -97,6 +123,7 @@ html[data-theme='dark'] .allocation-estimate-toggle { background: #1b2d46; }
 html[data-theme='dark'] .allocation-estimate-option.active { background: var(--surface); }
 html[data-theme='dark'] .allocation-impact-primary { border-color: #31517d; }
 html[data-theme='dark'] .allocation-impact-stretch { background: #26331d; border-color: #5b7130; }
+html[data-theme='dark'] .stretch-tag { color: #d7ed8a; background: #34451f; border-color: #5b7130; }
 html[data-theme='dark'] .ai-gain-metric.positive { background: #17352f; border-color: #2f6759; }
 html[data-theme='dark'] .ai-gain-metric.negative { background: #402b2a; border-color: #75453d; }
 html[data-theme='dark'] .ai-gain-chip { background: var(--surface); }
@@ -132,7 +159,7 @@ html[data-theme='dark'] .ai-gain-chip { background: var(--surface); }
 .pl-settings-card .modal-input { min-width: 180px; width: auto; }
 .pl-loading { display: grid; min-height: 100vh; color: var(--ink-muted); background: var(--canvas); place-items: center; font-size: 14px; }
 .pl-toast { position: fixed; right: 24px; bottom: 24px; z-index: 10; max-width: 360px; padding: 12px 15px; color: #fff; background: var(--navy); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; box-shadow: var(--shadow); font-size: 12px; }
-@media (max-width: 980px) { .pl-management-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; min-height: 0; } .sidebar-general-nav { margin-top: 18px; } .main-area { padding: 24px 18px 35px; } .topbar-actions { display: flex; } .pl-topbar-user { display: none; } .topbar-actions .outline-button { padding: 8px 10px; } .workspace-grid { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .estimate-fields { grid-template-columns: 1fr; } .hero-row { align-items: flex-start; flex-direction: column; } .pi-meta { width: 100%; } .room-settings-form, .room-access-overview { grid-template-columns: 1fr; } .room-settings-form .primary-button { justify-self: start; } .allocation-estimate-toggle { margin-top: 13px; } .allocation-impact-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .epic-resource-story { align-items: flex-start; } }
+@media (max-width: 980px) { .pl-management-grid { grid-template-columns: 1fr; } .allocation-impact-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; min-height: 0; } .sidebar-general-nav { margin-top: 18px; } .main-area { padding: 24px 18px 35px; } .topbar-actions { display: flex; } .pl-topbar-user { display: none; } .account-menu-name { display: none; } .topbar-actions .outline-button { padding: 8px 10px; } .workspace-grid { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .estimate-fields { grid-template-columns: 1fr; } .session-gate { grid-template-columns: auto minmax(0, 1fr); } .session-gate .primary-button { grid-column: 2; justify-self: start; } .hero-row { align-items: flex-start; flex-direction: column; } .pi-meta { width: 100%; } .room-settings-form, .room-access-overview { grid-template-columns: 1fr; } .room-settings-form .primary-button { justify-self: start; } .allocation-estimate-toggle { margin-top: 13px; } .allocation-impact-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .epic-resource-story { align-items: flex-start; } }
 @media (max-width: 480px) { .summary-grid { grid-template-columns: 1fr; } .estimator-card { padding: 20px 16px; } .card-heading { display: grid; } .sequence-control { justify-content: space-between; } .estimator-footer { align-items: flex-start; flex-direction: column; } .footer-actions { flex-wrap: wrap; } .auth-card { padding: 25px 20px; } .pl-member-actions { width: 100%; margin-left: 0; } .pl-member-actions .outline-button { flex: 1; } }
 
