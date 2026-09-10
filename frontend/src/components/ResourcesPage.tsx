@@ -1,4 +1,6 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { sprintCapacity } from '../capacityUtils';
 import type { RoomState, Story } from '../types';
 import { cloneState } from '../state';
 import { isStretchStory } from '../storyUtils';
@@ -26,6 +28,19 @@ type AllocationComparisonRow = {
   name: string;
   teamPoints: number;
   aiPoints: number;
+};
+type ReportBreakdownRow = Omit<AllocationComparisonRow, 'aiPoints'> & {
+  aiPoints: number | null;
+  comparisonTeamPoints: number;
+  comparisonAiPoints: number;
+};
+type AccountCapacityRow = {
+  id: string;
+  name: string;
+  office: string;
+  featureCapacity: number;
+  totalCapacity: number;
+  sprintCount: number;
 };
 
 function effectiveServiceLinks(state: RoomState, story: RoomState['stories'][number]) {
@@ -66,14 +81,14 @@ function allocationRows(state: RoomState, tab: ResourceTab, source: EstimateSour
   return [...totals.entries()].map(([key, points]) => ({ id: key, name: labels.get(key) || 'Unassigned', points })).sort((left, right) => right.points - left.points);
 }
 
-function comparisonStories(state: RoomState) {
-  return state.stories.filter((story) => story.type !== 'Epic' && story.manual !== null && story.ai !== null);
+function comparisonStories(state: RoomState, stories = state.stories) {
+  return stories.filter((story) => story.type !== 'Epic' && story.manual !== null && story.ai !== null);
 }
 
-function comparisonAllocationRows(state: RoomState, tab: ResourceTab): AllocationComparisonRow[] {
-  const stories = comparisonStories(state);
-  const teamRows = new Map(allocationRows(state, tab, 'team', stories).map((row) => [row.id, row]));
-  const aiRows = new Map(allocationRows(state, tab, 'ai', stories).map((row) => [row.id, row]));
+function comparisonAllocationRows(state: RoomState, tab: ResourceTab, stories = state.stories): AllocationComparisonRow[] {
+  const pairedStories = comparisonStories(state, stories);
+  const teamRows = new Map(allocationRows(state, tab, 'team', pairedStories).map((row) => [row.id, row]));
+  const aiRows = new Map(allocationRows(state, tab, 'ai', pairedStories).map((row) => [row.id, row]));
   const keys = new Set([...teamRows.keys(), ...aiRows.keys()]);
   return [...keys]
     .map((id) => ({
@@ -108,17 +123,59 @@ function gainDescription(teamPoints: number, aiPoints: number, pairedCount: numb
   return gain > 0 ? `AI is ${Math.round(gain)}% lower than team` : `AI is ${Math.round(Math.abs(gain))}% higher than team`;
 }
 
-function epicResourceRows(state: RoomState, view: EstimateView): EpicResourceRow[] {
+function reportBreakdownRows(state: RoomState, tab: ResourceTab, aiEnabled: boolean, stories = state.stories): ReportBreakdownRow[] {
+  const teamRows = new Map(allocationRows(state, tab, 'team', stories).map((row) => [row.id, row]));
+  const aiRows = aiEnabled ? new Map(allocationRows(state, tab, 'ai', stories).map((row) => [row.id, row])) : new Map();
+  const comparisonRows = aiEnabled ? new Map(comparisonAllocationRows(state, tab, stories).map((row) => [row.id, row])) : new Map();
+  const keys = new Set([...teamRows.keys(), ...aiRows.keys()]);
+  return [...keys]
+    .map((id) => ({
+      id,
+      name: teamRows.get(id)?.name || aiRows.get(id)?.name || 'Unassigned',
+      teamPoints: teamRows.get(id)?.points || 0,
+      aiPoints: aiRows.has(id) ? aiRows.get(id)?.points || 0 : null,
+      comparisonTeamPoints: comparisonRows.get(id)?.teamPoints || 0,
+      comparisonAiPoints: comparisonRows.get(id)?.aiPoints || 0,
+    }))
+    .sort((left, right) => right.teamPoints - left.teamPoints || (right.aiPoints || 0) - (left.aiPoints || 0) || left.name.localeCompare(right.name));
+}
+
+function accountCapacityRows(state: RoomState): AccountCapacityRow[] {
+  const sprints = state.capacity.sprints.filter((sprint) => !sprint.excludeFromTotal);
+  return state.capacity.members
+    .map((member) => {
+      const totals = sprints.reduce((sum, sprint) => {
+        const details = sprintCapacity(member, sprint, state.capacity.defaults);
+        return { feature: sum.feature + details.feature, total: sum.total + details.total };
+      }, { feature: 0, total: 0 });
+      return {
+        id: member.id,
+        name: member.name || 'Unnamed account',
+        office: member.office === 'beirut' ? 'Beirut' : 'Cyprus',
+        featureCapacity: totals.feature,
+        totalCapacity: totals.total,
+        sprintCount: sprints.length,
+      };
+    })
+    .sort((left, right) => right.featureCapacity - left.featureCapacity || left.name.localeCompare(right.name));
+}
+
+function storiesForResourceScope(state: RoomState, includeStretch: boolean) {
+  if (includeStretch) return state.stories;
+  return state.stories.filter((story) => story.type === 'Epic' ? !story.stretch : !isStretchStory(story, state.stories));
+}
+
+function epicResourceRows(state: RoomState, view: EstimateView, stories = state.stories): EpicResourceRow[] {
   const source: EstimateSource = view === 'ai' ? 'ai' : 'team';
-  const teamAllocations = new Map(allocationRows(state, 'epic', 'team').map((row) => [row.id, row]));
-  const aiAllocations = new Map(allocationRows(state, 'epic', 'ai').map((row) => [row.id, row]));
-  const comparisonRows = comparisonAllocationRows(state, 'epic');
+  const teamAllocations = new Map(allocationRows(state, 'epic', 'team', stories).map((row) => [row.id, row]));
+  const aiAllocations = new Map(allocationRows(state, 'epic', 'ai', stories).map((row) => [row.id, row]));
+  const comparisonRows = comparisonAllocationRows(state, 'epic', stories);
   const comparisonTeamAllocations = new Map(comparisonRows.map((row) => [row.id, row.teamPoints]));
   const comparisonAiAllocations = new Map(comparisonRows.map((row) => [row.id, row.aiPoints]));
   const comparisonAllocations = new Map(comparisonRows.map((row) => [row.id, { id: row.id, name: row.name, points: row.teamPoints }]));
   const allocationById = view === 'gain' ? comparisonAllocations : source === 'team' ? teamAllocations : aiAllocations;
   const childrenByEpic = new Map<string, RoomState['stories']>();
-  state.stories.filter((story) => story.type !== 'Epic').forEach((story) => {
+  stories.filter((story) => story.type !== 'Epic').forEach((story) => {
     const key = story.epicId || 'unassigned';
     const stories = childrenByEpic.get(key) || [];
     stories.push(story);
@@ -126,7 +183,7 @@ function epicResourceRows(state: RoomState, view: EstimateView): EpicResourceRow
   });
 
   const epicNames = new Map(state.stories.filter((story) => story.type === 'Epic').map((story) => [story.id, story.title]));
-  const epicIds = state.stories.filter((story) => story.type === 'Epic').map((story) => story.id);
+  const epicIds = stories.filter((story) => story.type === 'Epic').map((story) => story.id);
   const keys = new Set([...epicIds, ...teamAllocations.keys(), ...aiAllocations.keys(), ...childrenByEpic.keys()]);
   return [...keys]
     .map((id) => ({
@@ -155,6 +212,150 @@ function entityId(prefix: string, ids: string[]) {
   return id;
 }
 
+function ResourceReportChart({ rows, aiEnabled }: { rows: ReportBreakdownRow[]; aiEnabled: boolean }) {
+  const chartRows = rows.filter((row) => row.teamPoints > 0 || (row.aiPoints || 0) > 0).slice(0, 8);
+  const maxPoints = Math.max(1, ...chartRows.flatMap((row) => [row.teamPoints, row.aiPoints || 0]));
+  const hasAiData = chartRows.some((row) => row.aiPoints !== null);
+
+  if (!chartRows.length) return null;
+
+  return (
+    <div className="resource-report-chart">
+      <div className="resource-report-chart-heading">
+        <span className="section-kicker">Top allocation</span>
+        <div className="resource-report-chart-legend">
+          <span><i className="resource-report-chart-dot team" />Team</span>
+          {aiEnabled && hasAiData ? <span><i className="resource-report-chart-dot ai" />AI</span> : null}
+        </div>
+      </div>
+      <div className="resource-report-chart-list">
+        {chartRows.map((row) => (
+          <div className="resource-report-chart-row" key={row.id}>
+            <span className="resource-report-chart-label" title={row.name}>{row.name}</span>
+            <div className="resource-report-chart-bars">
+              <span className="resource-report-chart-bar team" style={{ width: `${(row.teamPoints / maxPoints) * 100}%` }} />
+              {aiEnabled && row.aiPoints !== null ? <span className="resource-report-chart-bar ai" style={{ width: `${(row.aiPoints / maxPoints) * 100}%` }} /> : null}
+            </div>
+            <span className="resource-report-chart-values">{formatEstimate(row.teamPoints)}{aiEnabled && row.aiPoints !== null ? ` / ${formatEstimate(row.aiPoints)}` : ''}</span>
+          </div>
+        ))}
+      </div>
+      {rows.length > chartRows.length ? <p className="resource-report-chart-note">Chart shows the top {chartRows.length} groups; the table includes every group.</p> : null}
+    </div>
+  );
+}
+
+function ResourceReportBreakdown({ title, description, rows, aiEnabled }: { title: string; description: string; rows: ReportBreakdownRow[]; aiEnabled: boolean }) {
+  const teamTotal = rows.reduce((sum, row) => sum + row.teamPoints, 0);
+  const hasAiData = rows.some((row) => row.aiPoints !== null);
+
+  return (
+    <section className="resource-report-section">
+      <div className="resource-report-section-heading">
+        <div>
+          <span className="section-kicker">Breakdown</span>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <span className="resource-report-section-total">{formatEstimate(teamTotal)} team pts</span>
+      </div>
+      {rows.length ? <>
+        <div className="resource-report-table-wrap">
+          <table className="resource-report-table">
+            <thead>
+              <tr>
+                <th scope="col">Group</th>
+                <th scope="col">Team estimate</th>
+                {aiEnabled ? <th scope="col">AI estimate</th> : null}
+                {aiEnabled ? <th scope="col">AI gain</th> : null}
+                <th scope="col">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <th scope="row">{row.name}</th>
+                  <td>{formatEstimate(row.teamPoints)}</td>
+                  {aiEnabled ? <td>{formatEstimate(row.aiPoints)}</td> : null}
+                  {aiEnabled ? <td className={`resource-report-gain ${gainTone(row.comparisonTeamPoints, row.comparisonAiPoints)}`}>{hasAiData ? formatGain(row.comparisonTeamPoints, row.comparisonAiPoints) : '—'}</td> : null}
+                  <td>{teamTotal ? `${Math.round((row.teamPoints / teamTotal) * 100)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ResourceReportChart rows={rows} aiEnabled={aiEnabled} />
+      </> : <div className="resource-report-empty">No saved estimates are available for this breakdown.</div>}
+    </section>
+  );
+}
+
+function ResourceReport({ state, aiEnabled, includeStretch }: { state: RoomState; aiEnabled: boolean; includeStretch: boolean }) {
+  const reportStories = storiesForResourceScope(state, includeStretch);
+  const teamStories = reportStories.filter((story) => story.type !== 'Epic' && story.manual !== null);
+  const aiStories = reportStories.filter((story) => story.type !== 'Epic' && story.ai !== null);
+  const pairedStories = aiEnabled ? comparisonStories(state, reportStories) : [];
+  const teamTotal = teamStories.reduce((sum, story) => sum + (story.manual || 0), 0);
+  const aiTotal = aiStories.reduce((sum, story) => sum + (story.ai || 0), 0);
+  const pairedTotals = pairedStories.reduce((totals, story) => ({
+    team: totals.team + (story.manual || 0),
+    ai: totals.ai + (story.ai || 0),
+  }), { team: 0, ai: 0 });
+  const accountRows = accountCapacityRows(state);
+  const generatedAt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date());
+
+  return (
+    <div className="resource-report" role="document">
+      <header className="resource-report-header">
+        <div>
+          <span className="resource-report-brand">POINTLINE / RESOURCE INTELLIGENCE</span>
+          <h1>Resource allocation report</h1>
+          <p>Story estimates rolled up by service, domain, epic, and account capacity · {includeStretch ? 'including stretch work' : 'committed work only'}.</p>
+        </div>
+        <div className="resource-report-meta">
+          <strong>{aiEnabled ? 'Team + AI comparison' : 'Team estimates only'}</strong>
+          <span>Generated {generatedAt}</span>
+        </div>
+      </header>
+
+      <div className={`resource-report-summary${aiEnabled ? '' : ' team-only'}`}>
+        <div><span>Team points</span><strong>{formatEstimate(teamTotal)}</strong><small>{teamStories.length} stories with estimates</small></div>
+        {aiEnabled ? <div><span>AI points</span><strong>{formatEstimate(aiTotal)}</strong><small>{aiStories.length} stories with AI estimates</small></div> : null}
+        {aiEnabled ? <div><span>AI gain</span><strong className={gainTone(pairedTotals.team, pairedTotals.ai)}>{formatGain(pairedTotals.team, pairedTotals.ai)}</strong><small>{pairedStories.length} stories compared</small></div> : null}
+        <div><span>Groups</span><strong>{state.services.length + state.domains.length + reportStories.filter((story) => story.type === 'Epic').length}</strong><small>configured services, domains, and epics</small></div>
+      </div>
+
+      {!aiEnabled ? <div className="resource-report-callout"><strong>AI comparison is disabled for this room.</strong><span>The report intentionally uses team-only tables and charts, so there are no empty AI columns or misleading comparison visuals.</span></div> : null}
+
+      <ResourceReportBreakdown title="By service" description="Weighted story points assigned to each service." rows={reportBreakdownRows(state, 'service', aiEnabled, reportStories)} aiEnabled={aiEnabled} />
+      <ResourceReportBreakdown title="By domain" description="Service allocations rolled up to their owning domain." rows={reportBreakdownRows(state, 'domain', aiEnabled, reportStories)} aiEnabled={aiEnabled} />
+      <ResourceReportBreakdown title="By epic" description="Story points grouped under each epic, including unassigned work." rows={reportBreakdownRows(state, 'epic', aiEnabled, reportStories)} aiEnabled={aiEnabled} />
+
+      <section className="resource-report-section resource-report-account-section">
+        <div className="resource-report-section-heading">
+          <div>
+            <span className="section-kicker">Capacity context</span>
+            <h2>By account</h2>
+            <p>Configured capacity by account across included sprints.</p>
+          </div>
+          <span className="resource-report-section-total">{accountRows.length} accounts</span>
+        </div>
+        {accountRows.length ? <div className="resource-report-table-wrap">
+          <table className="resource-report-table">
+            <thead>
+              <tr><th scope="col">Account</th><th scope="col">Office</th><th scope="col">Feature capacity</th><th scope="col">Total capacity</th><th scope="col">Sprints</th></tr>
+            </thead>
+            <tbody>{accountRows.map((row) => <tr key={row.id}><th scope="row">{row.name}</th><td>{row.office}</td><td>{formatEstimate(row.featureCapacity)}</td><td>{formatEstimate(row.totalCapacity)}</td><td>{row.sprintCount}</td></tr>)}</tbody>
+          </table>
+        </div> : <div className="resource-report-empty">No account capacity is configured yet.</div>}
+        <p className="resource-report-footnote">Story ownership is not assigned to accounts in the current planning model, so story points are not distributed across people. This section reports capacity context only.</p>
+      </section>
+
+      <footer className="resource-report-footer">Pointline resource report · Choose “Save as PDF” in the print dialog to export this report.</footer>
+    </div>
+  );
+}
+
 export function ResourcesPage({ state, saving, readOnly = false, onSave }: ResourcesPageProps) {
   const [tab, setTab] = useState<ResourceView>('service');
   const [estimateView, setEstimateView] = useState<EstimateView>('team');
@@ -164,13 +365,16 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
   const [serviceName, setServiceName] = useState('');
   const [serviceDomain, setServiceDomain] = useState('');
   const [editingEpic, setEditingEpic] = useState<Story | null>(null);
+  const [printingReport, setPrintingReport] = useState(false);
+  const [includeStretch, setIncludeStretch] = useState(false);
   const aiEnabled = state.roomSettings.aiEnabled;
   const visibleEstimateView: EstimateView = aiEnabled ? estimateView : 'team';
   const estimateSource: EstimateSource = visibleEstimateView === 'ai' ? 'ai' : 'team';
   const allocationTab: ResourceTab = tab === 'catalog' ? 'service' : tab;
-  const rows = useMemo(() => allocationRows(state, allocationTab, estimateSource), [allocationTab, estimateSource, state]);
-  const comparisonRows = useMemo(() => aiEnabled ? comparisonAllocationRows(state, allocationTab) : [], [aiEnabled, allocationTab, state]);
-  const epicRows = useMemo(() => epicResourceRows(state, visibleEstimateView), [state, visibleEstimateView]);
+  const scopedStories = useMemo(() => storiesForResourceScope(state, includeStretch), [includeStretch, state]);
+  const rows = useMemo(() => allocationRows(state, allocationTab, estimateSource, scopedStories), [allocationTab, estimateSource, scopedStories, state]);
+  const comparisonRows = useMemo(() => aiEnabled ? comparisonAllocationRows(state, allocationTab, scopedStories) : [], [aiEnabled, allocationTab, scopedStories, state]);
+  const epicRows = useMemo(() => epicResourceRows(state, visibleEstimateView, scopedStories), [scopedStories, state, visibleEstimateView]);
   const epicSearchOptions = useMemo<EpicSearchOption[]>(() => epicRows.map((row) => {
     const epic = state.stories.find((story) => story.id === row.id && story.type === 'Epic');
     const links = epic ? epic.serviceLinks : row.stories.flatMap((story) => effectiveServiceLinks(state, story));
@@ -189,9 +393,9 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
       return option ? matchesEpicSearch(option, epicSearch) : true;
     });
   }, [epicRows, epicSearch, epicSearchOptions]);
-  const estimatedStories = state.stories.filter((story) => story.type !== 'Epic' && estimateValue(story, estimateSource) !== null);
+  const estimatedStories = scopedStories.filter((story) => story.type !== 'Epic' && estimateValue(story, estimateSource) !== null);
   const total = estimatedStories.reduce((sum, story) => sum + (estimateValue(story, estimateSource) || 0), 0);
-  const pairedStories = useMemo(() => aiEnabled ? comparisonStories(state) : [], [aiEnabled, state]);
+  const pairedStories = useMemo(() => aiEnabled ? comparisonStories(state, scopedStories) : [], [aiEnabled, scopedStories, state]);
   const comparisonTotals = useMemo(() => pairedStories.reduce((totals, story) => ({
     team: totals.team + (story.manual || 0),
     ai: totals.ai + (story.ai || 0),
@@ -212,6 +416,26 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
     ? comparisonRows.map((row) => ({ ...row, points: row.teamPoints }))
     : rows.map((row) => ({ ...row, teamPoints: null, aiPoints: null })), [comparisonRows, rows, visibleEstimateView]);
   const displayTotal = visibleEstimateView === 'gain' ? comparisonTotals.team : total;
+
+  useEffect(() => {
+    if (!printingReport) return;
+    const previousTitle = document.title;
+    document.title = 'Pointline resource allocation report';
+    document.body.classList.add('printing-resource-report');
+    const finish = () => {
+      document.body.classList.remove('printing-resource-report');
+      document.title = previousTitle;
+      setPrintingReport(false);
+    };
+    const timer = window.setTimeout(() => window.print(), 80);
+    window.addEventListener('afterprint', finish, { once: true });
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('afterprint', finish);
+      document.body.classList.remove('printing-resource-report');
+      document.title = previousTitle;
+    };
+  }, [printingReport]);
 
   async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -281,7 +505,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         <div>
           <p className="eyebrow">Workspace · resources</p>
           <h1>See where the work lands.</h1>
-          <p className="hero-copy">Use saved story estimates to understand how the planned work rolls up across services, domains, and epics.</p>
+          <p className="hero-copy">Use saved story estimates to understand how the planned work rolls up across services, domains, and epics, or export a polished PDF report for planning reviews.</p>
         </div>
       </div>
 
@@ -289,17 +513,17 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         {aiEnabled ? <div className={`allocation-impact-item allocation-impact-primary ${gainTone(comparisonTotals.team, comparisonTotals.ai)}`}>
           <span>Overall AI gain</span>
           <strong>{formatGain(comparisonTotals.team, comparisonTotals.ai)}</strong>
-          <small>{gainDescription(comparisonTotals.team, comparisonTotals.ai, pairedStories.length)}</small>
+          <small>{gainDescription(comparisonTotals.team, comparisonTotals.ai, pairedStories.length)} · {includeStretch ? 'with' : 'without'} stretch</small>
         </div> : null}
         <div className="allocation-impact-item">
           <span>Team estimate</span>
           <strong>{formatEstimate(aiEnabled ? (pairedStories.length ? comparisonTotals.team : null) : total)}</strong>
-          <small>{aiEnabled ? 'paired story points' : `${estimatedStories.length} saved story points`}</small>
+          <small>{aiEnabled ? `paired story points · ${includeStretch ? 'with' : 'without'} stretch` : `${estimatedStories.length} saved story points · ${includeStretch ? 'with' : 'without'} stretch`}</small>
         </div>
         {aiEnabled ? <div className="allocation-impact-item">
           <span>AI estimate</span>
           <strong>{formatEstimate(pairedStories.length ? comparisonTotals.ai : null)}</strong>
-          <small>same stories as team</small>
+          <small>same stories as team · {includeStretch ? 'with' : 'without'} stretch</small>
         </div> : null}
         <div className="allocation-impact-item allocation-impact-stretch">
           <span>Stretch SPs</span>
@@ -322,9 +546,11 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         <div className="lower-card-heading">
           <div>
             <h2>{tab === 'catalog' ? 'Resource catalog' : 'Resource allocation'}</h2>
-            <p>{tab === 'catalog' ? 'Manage domains and services used by the planning room.' : visibleEstimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories.`}</p>
+            <p>{tab === 'catalog' ? 'Manage domains and services used by the planning room.' : visibleEstimateView === 'gain' ? `${formatEstimate(comparisonTotals.team)} team points → ${formatEstimate(comparisonTotals.ai)} AI points across ${pairedStories.length} paired stories · ${includeStretch ? 'including' : 'excluding'} stretch.` : `${formatEstimate(total)} ${estimateSource === 'team' ? 'saved team points' : 'AI points'} across ${estimatedStories.length} stories · ${includeStretch ? 'including' : 'excluding'} stretch.`}</p>
           </div>
           <div className="allocation-heading-controls">
+            {tab !== 'catalog' ? <label className="allocation-scope-toggle"><input type="checkbox" checked={includeStretch} onChange={(event) => setIncludeStretch(event.target.checked)} /><span><strong>Include stretch</strong><small>{includeStretch ? 'Totals include stretch work' : 'Committed work only'}</small></span></label> : null}
+            {tab !== 'catalog' ? <button className="outline-button resource-export-button" type="button" onClick={() => setPrintingReport(true)} disabled={printingReport} title="Open a print-ready report and save it as PDF"><AppIcon name="download" size={14} /> Export PDF</button> : null}
             {tab !== 'catalog' && aiEnabled ? <div className="allocation-estimate-toggle" role="group" aria-label="Estimate view">
               <span className="allocation-estimate-toggle-label">Show</span>
               {(['team', 'ai', 'gain'] as const).map((view) => (
@@ -468,6 +694,7 @@ export function ResourcesPage({ state, saving, readOnly = false, onSave }: Resou
         </section> : null}
       </div>
       {editingEpic ? <StoryEditorModal key={editingEpic.id} state={state} story={editingEpic} saving={saving} onClose={() => setEditingEpic(null)} onSave={saveEpic} /> : null}
+      {printingReport ? createPortal(<ResourceReport state={state} aiEnabled={aiEnabled} includeStretch={includeStretch} />, document.body) : null}
     </>
   );
 }

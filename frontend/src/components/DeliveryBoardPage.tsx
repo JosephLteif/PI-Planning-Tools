@@ -14,6 +14,7 @@ type DeliveryBoardPageProps = {
 };
 
 const EPIC_COLORS = ['#4968d8', '#b061d5', '#d47449', '#28a58b', '#c59b32', '#d95570', '#448ab9', '#7d8b3e'];
+type EstimateSource = 'team' | 'ai';
 
 function formatPoints(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -37,13 +38,15 @@ type DeliveryStoryCardProps = {
   sprints: CapacitySprint[];
   canEdit: boolean;
   saving: boolean;
+  estimateSource: EstimateSource;
   dragging: boolean;
   onMove: (storyId: string, sprintId: string | null) => void;
   onDragStart: (event: DragEvent<HTMLElement>, storyId: string) => void;
   onDragEnd: () => void;
 };
 
-function DeliveryStoryCard({ story, epic, epicColor, sprintId, sprints, canEdit, saving, dragging, onMove, onDragStart, onDragEnd }: DeliveryStoryCardProps) {
+function DeliveryStoryCard({ story, epic, epicColor, sprintId, sprints, canEdit, saving, estimateSource, dragging, onMove, onDragStart, onDragEnd }: DeliveryStoryCardProps) {
+  const estimate = estimateSource === 'ai' ? story.ai : story.manual;
   return (
     <article
       className={`delivery-story-card${dragging ? ' is-dragging' : ''}`}
@@ -55,7 +58,7 @@ function DeliveryStoryCard({ story, epic, epicColor, sprintId, sprints, canEdit,
     >
       <div className="delivery-story-heading">
         <span className="delivery-story-id">{story.id}</span>
-        <span className={`delivery-story-points${story.manual === null ? ' is-empty' : ''}`}>{story.manual === null ? 'No estimate' : `${formatPoints(story.manual)} SP`}</span>
+        <span className={`delivery-story-points${estimate === null ? ' is-empty' : ''}`}>{estimate === null ? 'No estimate' : `${formatPoints(estimate)} SP`}</span>
       </div>
       <strong className="delivery-story-title">{story.title}</strong>
       <div className="delivery-story-meta">
@@ -78,7 +81,10 @@ function DeliveryStoryCard({ story, epic, epicColor, sprintId, sprints, canEdit,
 export function DeliveryBoardPage({ room, state, user, saving, readOnly = false, onSave }: DeliveryBoardPageProps) {
   const [draggingStoryId, setDraggingStoryId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [estimateSource, setEstimateSource] = useState<EstimateSource>('team');
   const canEdit = !readOnly && (room.role === 'owner' || room.role === 'admin' || user.role === 'admin');
+  const aiEnabled = state.roomSettings.aiEnabled;
+  const visibleEstimateSource: EstimateSource = aiEnabled ? estimateSource : 'team';
   const sprints = state.capacity.sprints;
   const assignments = state.capacity.storySprintIds || {};
   const stories = useMemo(() => state.stories.filter((story) => story.type !== 'Epic'), [state.stories]);
@@ -109,10 +115,10 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
   }), [assignments, epics, sprintIndex, sprints, stories]);
   const sprintMetrics = useMemo(() => new Map(sprints.map((sprint) => {
     const sprintStories = storiesBySprint.get(sprint.id) || [];
-    const load = sprintStories.reduce((total, story) => total + (story.manual ?? 0), 0);
+    const load = sprintStories.reduce((total, story) => total + ((visibleEstimateSource === 'ai' ? story.ai : story.manual) ?? 0), 0);
     const capacity = sprintFeatureCapacity(state.capacity, sprint);
     return [sprint.id, { load, capacity, overloaded: load > capacity + 0.01 }];
-  })), [sprints, state.capacity, storiesBySprint]);
+  })), [sprints, state.capacity, storiesBySprint, visibleEstimateSource]);
   const plannedLoad = [...sprintMetrics.values()].reduce((total, metric) => total + metric.load, 0);
   const overloadedCount = [...sprintMetrics.values()].filter((metric) => metric.overloaded).length;
 
@@ -152,10 +158,10 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
     const sprintId = sprint?.id || null;
     const columnStoriesValue = columnStories(sprintId);
     const metric = sprintId ? sprintMetrics.get(sprintId) : null;
-    const load = metric?.load ?? columnStoriesValue.reduce((total, story) => total + (story.manual ?? 0), 0);
+    const load = metric?.load ?? columnStoriesValue.reduce((total, story) => total + ((visibleEstimateSource === 'ai' ? story.ai : story.manual) ?? 0), 0);
     const capacity = metric?.capacity ?? null;
     const overloaded = metric?.overloaded === true;
-    const unestimatedCount = columnStoriesValue.filter((story) => story.manual === null).length;
+    const unestimatedCount = columnStoriesValue.filter((story) => (visibleEstimateSource === 'ai' ? story.ai : story.manual) === null).length;
     const loadPercent = capacity && capacity > 0 ? Math.min(100, (load / capacity) * 100) : load > 0 ? 100 : 0;
     return (
       <section
@@ -182,7 +188,7 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
           {columnStoriesValue.length ? columnStoriesValue.map((story) => {
             const epic = story.epicId ? epics.find((candidate) => candidate.id === story.epicId) || null : null;
             const color = epic ? epicColors.get(epic.id) || EPIC_COLORS[0] : '#9aa7b8';
-            return <DeliveryStoryCard key={story.id} story={story} epic={epic} epicColor={color} sprintId={sprintId} sprints={sprints} canEdit={canEdit} saving={saving} dragging={draggingStoryId === story.id} onMove={(storyId, nextSprintId) => void moveStory(storyId, nextSprintId)} onDragStart={handleDragStart} onDragEnd={() => { setDraggingStoryId(null); setDragOverId(null); }} />;
+            return <DeliveryStoryCard key={story.id} story={story} epic={epic} epicColor={color} sprintId={sprintId} sprints={sprints} canEdit={canEdit} saving={saving} estimateSource={visibleEstimateSource} dragging={draggingStoryId === story.id} onMove={(storyId, nextSprintId) => void moveStory(storyId, nextSprintId)} onDragStart={handleDragStart} onDragEnd={() => { setDraggingStoryId(null); setDragOverId(null); }} />;
           }) : <div className="delivery-column-empty"><AppIcon name={sprint ? 'move' : 'inbox'} size={19} /><span>{sprint ? 'Drop stories here' : 'All stories are planned'}</span></div>}
         </div>
       </section>
@@ -206,10 +212,17 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
         ))}</div> : <div className="delivery-empty-inline">Create an Epic and link stories to it to see its delivery sprint here.</div>}
       </section>
 
+      {aiEnabled ? <div className="delivery-board-toolbar">
+        <div><span className="section-kicker">Story points</span><p>Switch the board load and cards between Team and AI estimates.</p></div>
+        <div className="allocation-estimate-toggle" role="group" aria-label="Delivery board estimate source">
+          <span className="allocation-estimate-toggle-label">Show</span>
+          {(['team', 'ai'] as const).map((source) => <button key={source} className={`allocation-estimate-option${visibleEstimateSource === source ? ' active' : ''}`} type="button" aria-pressed={visibleEstimateSource === source} onClick={() => setEstimateSource(source)}>{source === 'team' ? 'Team' : 'AI'}</button>)}
+        </div>
+      </div> : null}
       <div className="delivery-board-summary" aria-label="Delivery plan summary">
         <div><span>Sprints</span><strong>{sprints.length}</strong><small>from capacity</small></div>
-        <div><span>Planned load</span><strong>{formatPoints(plannedLoad)} SP</strong><small>team estimates</small></div>
-        <div><span>Unplanned</span><strong>{unplannedStories.length}</strong><small>{formatPoints(unplannedStories.reduce((total, story) => total + (story.manual ?? 0), 0))} SP to place</small></div>
+        <div><span>Planned load</span><strong>{formatPoints(plannedLoad)} SP</strong><small>{visibleEstimateSource === 'team' ? 'team estimates' : 'AI estimates'}</small></div>
+        <div><span>Unplanned</span><strong>{unplannedStories.length}</strong><small>{formatPoints(unplannedStories.reduce((total, story) => total + ((visibleEstimateSource === 'ai' ? story.ai : story.manual) ?? 0), 0))} SP to place</small></div>
         <div className={overloadedCount ? 'is-overloaded' : ''}><span>Over capacity</span><strong>{overloadedCount}</strong><small>{overloadedCount ? 'sprint needs attention' : 'all sprint loads fit'}</small></div>
       </div>
 

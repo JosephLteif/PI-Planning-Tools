@@ -932,6 +932,7 @@ h1 {
 }
 
 .estimate-field {
+  min-width: 0;
   padding: 17px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -988,15 +989,17 @@ h1 {
 }
 
 .point-options {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(35px, 1fr));
+  min-width: 0;
   gap: 6px;
 }
 
 .point-button {
-  min-width: 35px;
+  width: 100%;
+  min-width: 0;
   height: 31px;
-  padding: 0 8px;
+  padding: 0 5px;
   color: var(--ink-muted);
   background: #fff;
   border: 1px solid var(--line-strong);
@@ -1028,17 +1031,23 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   gap: 10px;
   margin-top: 13px;
 }
 
 .custom-label {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink-soft);
   font-size: 10px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field-input {
+  flex: 0 0 73px;
   width: 73px;
   padding: 7px 8px;
   color: var(--ink);
@@ -1122,6 +1131,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   margin-top: 24px;
   padding-top: 18px;
@@ -1130,8 +1140,10 @@ h1 {
 
 .status-message {
   display: flex;
+  flex: 1 1 180px;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   min-height: 18px;
   color: var(--ink-soft);
   font-size: 10px;
@@ -1145,8 +1157,12 @@ h1 {
 }
 
 .footer-actions {
+  flex: 1 1 360px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  flex-wrap: wrap;
   gap: 9px;
 }
 
@@ -2607,6 +2623,7 @@ html[data-theme='dark'] .modal-epic-picker {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 15px;
   padding-top: 14px;
@@ -2615,8 +2632,10 @@ html[data-theme='dark'] .modal-epic-picker {
 
 .vote-status {
   display: inline-flex;
+  flex: 1 1 180px;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   color: var(--ink-soft);
   font-size: 10px;
   font-weight: 600;
@@ -2630,6 +2649,8 @@ html[data-theme='dark'] .modal-epic-picker {
 
 .vote-actions {
   display: flex;
+  flex: 1 1 320px;
+  min-width: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 7px;
