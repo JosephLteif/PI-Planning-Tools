@@ -122,19 +122,22 @@ export async function deleteTeam(db, user, teamId) {
 export async function readTeams(db, userId, includeAll = false) {
   const result = includeAll
     ? await db.prepare(`SELECT t.id, t.name, t.owner_account_id,
+        t.train_id, tr.name AS train_name,
         COALESCE(mine.role, CASE WHEN t.owner_account_id = ? THEN 'owner' ELSE 'member' END) AS role,
         COUNT(all_members.account_id) AS member_count
       FROM teams t
+      LEFT JOIN trains tr ON tr.id = t.train_id
       LEFT JOIN team_members mine ON mine.team_id = t.id AND mine.account_id = ?
       LEFT JOIN team_members all_members ON all_members.team_id = t.id
-      GROUP BY t.id, t.name, t.owner_account_id, mine.role
+      GROUP BY t.id, t.name, t.owner_account_id, t.train_id, tr.name, mine.role
       ORDER BY t.updated_at DESC, t.id`).bind(userId, userId).all()
-    : await db.prepare(`SELECT t.id, t.name, t.owner_account_id, tm.role,
+    : await db.prepare(`SELECT t.id, t.name, t.owner_account_id, t.train_id, tr.name AS train_name, tm.role,
         COUNT(all_members.account_id) AS member_count
       FROM teams t
+      LEFT JOIN trains tr ON tr.id = t.train_id
       JOIN team_members tm ON tm.team_id = t.id AND tm.account_id = ?
       LEFT JOIN team_members all_members ON all_members.team_id = t.id
-      GROUP BY t.id, t.name, t.owner_account_id, tm.role
+      GROUP BY t.id, t.name, t.owner_account_id, t.train_id, tr.name, tm.role
       ORDER BY t.updated_at DESC, t.id`).bind(userId).all();
   const teams = await Promise.all(rows(result).map(async (team) => {
     const members = await db.prepare(`SELECT a.id, a.display_name, a.email, tm.role
@@ -143,6 +146,8 @@ export async function readTeams(db, userId, includeAll = false) {
     return {
       id: team.id,
       name: team.name,
+      trainId: team.train_id || null,
+      trainName: team.train_name || null,
       role: team.owner_account_id === userId ? 'owner' : team.role === 'owner' ? 'owner' : 'member',
       memberCount: Math.max(0, Number(team.member_count) || 0),
       members: rows(members).map((member) => ({

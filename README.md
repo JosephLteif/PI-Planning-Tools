@@ -45,7 +45,7 @@ After sign-in:
 
 - each Pointline account is stored in the configured database and automatically joins the shared PI71 Planning room;
 - the Rooms page creates separate planning rooms with their own story queue and membership;
-- the Team page creates reusable teams, and invite links can add a person to a team, add a person to a room, or bring a team into a room;
+- the Team page creates reusable teams and workspace admins can group those teams into trains; invite links can add a person to a team, add a person to a room, or bring a team into a room;
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in the configured database;
 - votes are stored per account, story, and round;
 - hidden rounds return only your own vote plus the submitted count; open and revealed rounds return the room’s votes;
@@ -57,7 +57,7 @@ The database schema is defined in [db/schema.ts](db/schema.ts), and the generate
 
 An admin creates member accounts from the Admin users page, then copies each credential pair to the teammate through a private channel.
 
-The Admin page can export a versioned JSON backup containing accounts, rooms, room memberships, teams, epics, stories, estimates, capacity, planning rounds, votes, and invites. Importing the backup into another instance merges records by their IDs and maps matching usernames, so the workspace can continue without recreating the planning data. Sessions are intentionally not exported; imported users sign in again.
+The Admin page can export a versioned JSON backup containing accounts, rooms, room memberships, trains, teams, epics, stories, estimates, capacity, planning rounds, votes, and invites. Importing the backup into another instance merges records by their IDs and maps matching usernames, so the workspace can continue without recreating the planning data. Sessions are intentionally not exported; imported users sign in again.
 
 ## Deployment
 

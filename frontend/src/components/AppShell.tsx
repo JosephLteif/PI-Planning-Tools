@@ -101,8 +101,8 @@ export function AppShell({
               <AppIcon name="shield" size={16} /><span className="nav-link-label">Admin</span>
             </button>
           ) : null}
-          <button className={`nav-link${view === 'team' ? ' active' : ''}`} type="button" onClick={() => onViewChange('team')} aria-label="Team" title={collapsed ? 'Team' : undefined}>
-            <AppIcon name="users" size={16} /><span className="nav-link-label">Team</span>
+          <button className={`nav-link${view === 'team' ? ' active' : ''}`} type="button" onClick={() => onViewChange('team')} aria-label="Teams and trains" title={collapsed ? 'Teams and trains' : undefined}>
+            <AppIcon name="users" size={16} /><span className="nav-link-label">Teams &amp; trains</span>
           </button>
         </nav>
         <div className="sidebar-user">
@@ -112,7 +112,7 @@ export function AppShell({
       </aside>
       <main className="main-area">
         <div className="topbar">
-          <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Estimates' : view === 'settings' ? 'Room settings' : view === 'board' ? 'Delivery board' : view[0].toUpperCase() + view.slice(1)}</span></div>
+          <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Estimates' : view === 'settings' ? 'Room settings' : view === 'board' ? 'Delivery board' : view === 'team' ? 'Teams & trains' : view[0].toUpperCase() + view.slice(1)}</span></div>
           <div className="topbar-actions">
             <div className="account-menu" ref={accountMenuRef}>
               <button className="account-menu-trigger" type="button" aria-label="Account menu" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((current) => !current)}>

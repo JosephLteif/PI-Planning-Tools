@@ -47,9 +47,24 @@ export type TeamMember = {
 export type Team = {
   id: string;
   name: string;
+  trainId: string | null;
+  trainName: string | null;
   role: 'owner' | 'member';
   memberCount: number;
   members: TeamMember[];
+};
+
+export type TrainTeam = {
+  id: string;
+  name: string;
+  memberCount: number;
+};
+
+export type Train = {
+  id: string;
+  name: string;
+  teamCount: number;
+  teams: TrainTeam[];
 };
 
 export type Estimate = number | null;

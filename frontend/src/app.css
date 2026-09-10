@@ -73,6 +73,7 @@
 .pl-team-card:hover, .pl-team-card.active { background: #f1f6df; border-color: #e3edb6; }
 .pl-team-card strong { font-size: 12px; }
 .pl-team-card p { margin: 5px 0 0; color: var(--ink-soft); font-size: 10px; }
+.pl-train-card { border-left: 3px solid var(--blue); }
 .pl-team-members { display: flex; padding-left: 8px; }
 .pl-team-members .avatar { width: 27px; height: 27px; margin-left: -8px; border: 2px solid var(--surface); }
 .pl-placeholder { min-height: 250px; }

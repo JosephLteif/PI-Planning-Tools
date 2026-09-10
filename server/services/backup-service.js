@@ -6,6 +6,7 @@ const TABLES = [
   'accounts',
   'rooms',
   'roomMembers',
+  'trains',
   'teams',
   'teamMembers',
   'roomInvites',
@@ -22,6 +23,7 @@ const TABLE_LIMITS = {
   accounts: 10_000,
   rooms: 5_000,
   roomMembers: 100_000,
+  trains: 5_000,
   teams: 5_000,
   teamMembers: 100_000,
   roomInvites: 100_000,
@@ -89,7 +91,7 @@ function validateBackup(input) {
   }
   const data = {};
   TABLES.forEach((key) => {
-    data[key] = requireBackupArray(input.data, key);
+    data[key] = key === 'trains' && input.data[key] === undefined ? [] : requireBackupArray(input.data, key);
   });
   return data;
 }
@@ -118,7 +120,7 @@ function remapAccountReferences(data, accountIdMap) {
     ...data,
     accounts: data.accounts.map((record) => ({ ...record, id: remap(record.id) })),
     rooms: data.rooms.map((record) => ({ ...record, owner_account_id: remap(record.owner_account_id) })),
-    teams: data.teams.map((record) => ({ ...record, owner_account_id: remap(record.owner_account_id) })),
+    teams: data.teams.map((record) => ({ ...record, owner_account_id: remap(record.owner_account_id), train_id: record.train_id ?? null })),
     roomMembers: data.roomMembers.map((record) => ({ ...record, account_id: remap(record.account_id) })),
     teamMembers: data.teamMembers.map((record) => ({ ...record, account_id: remap(record.account_id) })),
     roomInvites: data.roomInvites.map((record) => ({ ...record, created_by: remap(record.created_by) })),
@@ -151,12 +153,18 @@ export async function importBackup(db, input) {
         vote_mode = excluded.vote_mode, ai_enabled = excluded.ai_enabled, capacity_json = excluded.capacity_json,
         created_at = excluded.created_at, updated_at = excluded.updated_at`, record,
       ['id', 'name', 'pi_label', 'owner_account_id', 'state_version', 'sequence_key', 'selected_story_key', 'vote_mode', 'ai_enabled', 'capacity_json', 'created_at', 'updated_at'], 'rooms')),
-    ...data.teams.map((record) => prepareInsert(db, `INSERT INTO teams
-      (id, name, owner_account_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_account_id = excluded.owner_account_id,
+    ...data.trains.map((record) => prepareInsert(db, `INSERT INTO trains
+      (id, name, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name,
         created_at = excluded.created_at, updated_at = excluded.updated_at`, record,
-      ['id', 'name', 'owner_account_id', 'created_at', 'updated_at'], 'teams')),
+      ['id', 'name', 'created_at', 'updated_at'], 'trains')),
+    ...data.teams.map((record) => prepareInsert(db, `INSERT INTO teams
+      (id, name, owner_account_id, train_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_account_id = excluded.owner_account_id,
+        train_id = excluded.train_id, created_at = excluded.created_at, updated_at = excluded.updated_at`, record,
+      ['id', 'name', 'owner_account_id', 'train_id', 'created_at', 'updated_at'], 'teams')),
     ...data.roomMembers.map((record) => prepareInsert(db, `INSERT INTO room_members
       (room_id, account_id, role, created_at)
       VALUES (?, ?, ?, ?)
