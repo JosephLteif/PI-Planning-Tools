@@ -127,7 +127,7 @@ export type RoundVote = {
 };
 
 export type Round = {
-  phase: 'idle' | 'voting' | 'revealed';
+  phase: 'idle' | 'voting' | 'revealed' | 'paused';
   mode: 'hidden' | 'open';
   hideVoteCountUntilComplete: boolean;
   storyId: string | null;

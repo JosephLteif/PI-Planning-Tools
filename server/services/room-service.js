@@ -66,7 +66,7 @@ export async function readRoomState(db, roomId, userId) {
       FROM votes v
       JOIN planning_rounds pr ON pr.room_id = v.room_id AND pr.story_key = v.story_key AND pr.round_number = v.round_number
       LEFT JOIN accounts a ON a.id = v.account_id
-      WHERE v.room_id = ? AND (pr.phase = 'revealed' OR pr.mode = 'open')
+      WHERE v.room_id = ? AND (pr.phase = 'revealed' OR (pr.phase = 'paused' AND pr.revealed_at IS NOT NULL) OR pr.mode = 'open')
         AND (v.manual_estimate IS NOT NULL OR v.ai_estimate IS NOT NULL)
       ORDER BY v.story_key, v.round_number, v.updated_at, v.account_id`).bind(roomId).all(),
     db.prepare(`SELECT rm.account_id, rm.role AS room_role, tm.role AS team_role, a.display_name, a.email
@@ -154,6 +154,12 @@ export async function readRoomState(db, roomId, userId) {
       FROM planning_rounds WHERE room_id = ? AND story_key = ?
       ORDER BY round_number DESC LIMIT 1`).bind(roomId, selectedStoryId).first();
   }
+  if (!currentRound || currentRound.phase !== 'paused') {
+    const pausedRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at, timer_started_at
+      FROM planning_rounds WHERE room_id = ? AND phase = 'paused'
+      ORDER BY updated_at DESC LIMIT 1`).bind(roomId).first();
+    if (pausedRound) currentRound = pausedRound;
+  }
 
   const round = currentRound
     ? {
@@ -164,7 +170,7 @@ export async function readRoomState(db, roomId, userId) {
       roundNumber: Number(currentRound.round_number) || 1,
       submittedCount: 0,
       votes: {},
-      cardFlipped: currentRound.phase === 'revealed',
+      cardFlipped: currentRound.phase === 'revealed' || (currentRound.phase === 'paused' && Boolean(currentRound.revealed_at)),
       revealedAt: currentRound.revealed_at || null,
       timerStartedAt: currentRound.timer_started_at || (currentRound.timer_ends_at ? new Date(Date.parse(currentRound.timer_ends_at) - 5 * 60 * 1000).toISOString() : null),
       timerEndsAt: currentRound.timer_ends_at || null,
@@ -208,7 +214,7 @@ export async function readRoomState(db, roomId, userId) {
       WHERE v.room_id = ? AND v.story_key = ? AND v.round_number = ?
       ORDER BY v.updated_at, v.account_id`).bind(roomId, round.storyId, round.roundNumber).all();
     const voteRows = rows(voteResult);
-    const canSeeAllVotes = round.phase === 'revealed' || round.mode === 'open';
+    const canSeeAllVotes = round.phase === 'revealed' || (round.phase === 'paused' && round.revealedAt !== null) || round.mode === 'open';
     const voteByPlayer = new Map(voteRows.map((vote) => [vote.account_id, vote]));
     round.votes = Object.fromEntries(voteRows
       .filter((vote) => activeParticipantIds.has(vote.account_id) && (canSeeAllVotes || vote.account_id === userId))

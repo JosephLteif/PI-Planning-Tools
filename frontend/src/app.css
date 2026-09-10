@@ -36,6 +36,8 @@
 .round-badge.is-flipped { color: var(--green); background: #eaf8f2; }
 .session-gate { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 15px; align-items: center; margin-top: 24px; padding: 19px; background: #f8fafc; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
 .session-gate-icon { display: grid; width: 42px; height: 42px; color: var(--blue); background: var(--blue-soft); border-radius: 12px; place-items: center; }
+.session-gate.session-paused { border-color: #d6b35f; background: #fffaf0; }
+.session-gate.session-paused .session-gate-icon { color: #9a6a00; background: #fff0c7; }
 .session-gate h3 { margin: 4px 0 5px; font-size: 16px; letter-spacing: -.03em; }
 .session-gate p:not(.section-kicker) { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .round-next-epic-select { min-width: 150px; padding: 8px 25px 8px 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; font-size: 10px; font-weight: 700; }
