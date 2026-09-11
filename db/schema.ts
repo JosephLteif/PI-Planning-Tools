@@ -51,23 +51,13 @@ export const roomMembers = sqliteTable('room_members', {
   roomMembersPk: primaryKey({ columns: [table.roomId, table.accountId] }),
 }));
 
-export const trains = sqliteTable('trains', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-});
-
 export const teams = sqliteTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerAccountId: text('owner_account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
-  trainId: text('train_id').references(() => trains.id, { onDelete: 'set null' }),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
-}, (table) => ({
-  teamsTrainIdx: index('teams_train_idx').on(table.trainId),
-}));
+});
 
 export const teamMembers = sqliteTable('team_members', {
   teamId: text('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),

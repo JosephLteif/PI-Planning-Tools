@@ -22,7 +22,6 @@ import {
 } from '../services/auth-service.js';
 import { canManageRoom, readDirectoryUsers, requireMember } from '../services/access-service.js';
 import { addTeamMember, createTeam, deleteTeam, promoteTeamOwner, readTeams, removeTeamMember, updateTeamMemberRole } from '../services/team-service.js';
-import { addTeamToTrain, createTrain, deleteTrain, readTrains, removeTeamFromTrain } from '../services/train-service.js';
 import {
   addRoomMembers,
   createRoom,
@@ -72,33 +71,6 @@ export async function handleApiRequest(request, env) {
   }
 
   const roomId = roomIdFromRequest(request);
-
-  if (url.pathname === '/api/trains' && request.method === 'GET') {
-    requireAdmin(user);
-    return json({ trains: await readTrains(env.DB) });
-  }
-  if (url.pathname === '/api/trains' && request.method === 'POST') {
-    const train = await createTrain(env.DB, user, await readJson(request));
-    return json({ ok: true, train }, 201);
-  }
-
-  const trainTeamPathMatch = url.pathname.match(/^\/api\/trains\/([^/]+)\/teams\/([^/]+)$/);
-  if (trainTeamPathMatch && request.method === 'DELETE') {
-    const trainId = decodeURIComponent(trainTeamPathMatch[1]);
-    const teamId = decodeURIComponent(trainTeamPathMatch[2]);
-    return json(await removeTeamFromTrain(env.DB, user, trainId, teamId));
-  }
-  if (trainTeamPathMatch && request.method === 'POST') {
-    const trainId = decodeURIComponent(trainTeamPathMatch[1]);
-    const teamId = decodeURIComponent(trainTeamPathMatch[2]);
-    return json(await addTeamToTrain(env.DB, user, trainId, teamId));
-  }
-
-  const trainPathMatch = url.pathname.match(/^\/api\/trains\/([^/]+)$/);
-  if (trainPathMatch && request.method === 'DELETE') {
-    const trainId = decodeURIComponent(trainPathMatch[1]);
-    return json(await deleteTrain(env.DB, user, trainId));
-  }
 
   if (url.pathname === '/api/teams' && request.method === 'GET') {
     return json({ teams: await readTeams(env.DB, user.id, user.role === 'admin') });

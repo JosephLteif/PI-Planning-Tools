@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, addTeamToTrain, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, createTrain, deleteAdminUser, deleteRoom, deleteTeam, deleteTrain, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, listTrains, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamFromTrain, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AppIcon } from './components/AppIcon';
 import { AuthScreen } from './components/AuthScreen';
@@ -12,7 +12,7 @@ import { RoomsPage } from './components/RoomsPage';
 import { TeamPage } from './components/TeamPage';
 import { SettingsPage } from './components/WorkspacePage';
 import { defaultRoomState } from './state';
-import type { Room, RoomPayload, RoomState, Team, Train, User } from './types';
+import type { Room, RoomPayload, RoomState, Team, User } from './types';
 import './app.css';
 
 type SessionStatus = 'loading' | 'signed-out' | 'signed-in';
@@ -31,7 +31,6 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [trains, setTrains] = useState<Train[]>([]);
   const [directoryUsers, setDirectoryUsers] = useState<User[]>([]);
   const [adminUsers, setAdminUsers] = useState<import('./types').AdminUser[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState('');
@@ -84,10 +83,9 @@ export default function App() {
         const queryRoom = new URLSearchParams(window.location.search).get('room');
         const nextRoomId = nextRooms.some((room) => room.id === queryRoom) ? queryRoom! : nextRooms[0]?.id;
         if (!nextRoomId) throw new Error('No planning room is available for this account.');
-        const [payload, nextTeams, nextTrains, nextAdminUsers, nextDirectoryUsers] = await Promise.all([
+        const [payload, nextTeams, nextAdminUsers, nextDirectoryUsers] = await Promise.all([
           loadRoom(nextRoomId),
           listTeams(),
-          user.role === 'admin' ? listTrains() : Promise.resolve([]),
           user.role === 'admin' ? listAdminUsers(nextRoomId) : Promise.resolve([]),
           listDirectoryUsers(),
         ]);
@@ -95,7 +93,6 @@ export default function App() {
         setSelectedRoomId(nextRoomId);
         setRoomPayload(payload);
         setTeams(nextTeams);
-        setTrains(nextTrains);
         setAdminUsers(nextAdminUsers);
         setDirectoryUsers(nextDirectoryUsers);
       } catch (error) {
@@ -201,7 +198,6 @@ export default function App() {
     setUser(null);
     setRooms([]);
     setTeams([]);
-    setTrains([]);
     setDirectoryUsers([]);
     setAdminUsers([]);
     setSelectedRoomId('');
@@ -216,7 +212,6 @@ export default function App() {
     setUser(null);
     setRooms([]);
     setTeams([]);
-    setTrains([]);
     setDirectoryUsers([]);
     setAdminUsers([]);
     setSelectedRoomId('');
@@ -352,19 +347,6 @@ export default function App() {
     }
   }
 
-  async function handleCreateTrain(name: string) {
-    setSaving(true);
-    try {
-      const result = await createTrain(name);
-      setTrains((current) => [...current, result.train]);
-      setNotice(`${name} created`);
-    } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function handleAddTeamMember(teamId: string, accountId: string) {
     setSaving(true);
     try {
@@ -397,54 +379,7 @@ export default function App() {
     try {
       await deleteTeam(teamId);
       setTeams((current) => current.filter((team) => team.id !== teamId));
-      setTrains((current) => current.map((train) => {
-        const nextTeams = train.teams.filter((team) => team.id !== teamId);
-        return nextTeams.length === train.teams.length ? train : { ...train, teams: nextTeams, teamCount: nextTeams.length };
-      }));
       setNotice('Team deleted');
-    } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDeleteTrain(trainId: string) {
-    setSaving(true);
-    try {
-      const result = await deleteTrain(trainId);
-      const releasedTeamIds = new Set(result.teamIds);
-      setTrains((current) => current.filter((train) => train.id !== trainId));
-      setTeams((current) => current.map((team) => releasedTeamIds.has(team.id) ? { ...team, trainId: null, trainName: null } : team));
-      setNotice('Train deleted; its teams are unassigned');
-    } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleAddTeamToTrain(trainId: string, teamId: string) {
-    setSaving(true);
-    try {
-      const result = await addTeamToTrain(trainId, teamId);
-      setTrains((current) => current.map((train) => train.id === trainId ? result.train : train));
-      if (result.team) setTeams((current) => current.map((team) => team.id === teamId ? result.team! : team));
-      setNotice('Team added to train');
-    } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleRemoveTeamFromTrain(trainId: string, teamId: string) {
-    setSaving(true);
-    try {
-      const result = await removeTeamFromTrain(trainId, teamId);
-      setTrains((current) => current.map((train) => train.id === trainId ? result.train : train));
-      if (result.team) setTeams((current) => current.map((team) => team.id === teamId ? result.team! : team));
-      setNotice('Team removed from train');
     } catch (error) {
       setNotice(errorMessage(error));
     } finally {
@@ -668,7 +603,7 @@ export default function App() {
       : view === 'rooms'
         ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
-          ? <TeamPage teams={teams} trains={trains} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} canManageTrains={user.role === 'admin'} onCreate={handleCreateTeam} onCreateTrain={handleCreateTrain} onAddMember={handleAddTeamMember} onUpdateMemberRole={handleUpdateTeamMemberRole} onDelete={handleDeleteTeam} onDeleteTrain={handleDeleteTrain} onAddTeamToTrain={handleAddTeamToTrain} onRemoveTeamFromTrain={handleRemoveTeamFromTrain} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
+          ? <TeamPage teams={teams} directoryUsers={directoryUsers} saving={saving} canManage={user.role === 'admin'} onCreate={handleCreateTeam} onAddMember={handleAddTeamMember} onUpdateMemberRole={handleUpdateTeamMemberRole} onDelete={handleDeleteTeam} onRemoveMember={handleRemoveTeamMember} onPromoteOwner={handlePromoteTeamOwner} />
         : view === 'settings'
             ? <SettingsPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
             : view === 'board'

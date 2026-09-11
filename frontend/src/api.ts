@@ -1,4 +1,4 @@
-import type { AdminUser, Room, RoomPayload, RoomState, Team, Train, User } from './types';
+import type { AdminUser, Room, RoomPayload, RoomState, Team, User } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -89,10 +89,6 @@ export async function listTeams(): Promise<Team[]> {
   return (await request<{ teams: Team[] }>('/api/teams')).teams;
 }
 
-export async function listTrains(): Promise<Train[]> {
-  return (await request<{ trains: Train[] }>('/api/trains')).trains;
-}
-
 export async function listAdminUsers(roomId: string): Promise<AdminUser[]> {
   return (await request<{ users: AdminUser[] }>(withRoom('/api/admin/users', roomId))).users;
 }
@@ -153,29 +149,6 @@ export function createTeam(name: string) {
   return request<{ ok: true; team: Team }>('/api/teams', {
     method: 'POST',
     body: { name },
-  });
-}
-
-export function createTrain(name: string) {
-  return request<{ ok: true; train: Train }>('/api/trains', {
-    method: 'POST',
-    body: { name },
-  });
-}
-
-export function deleteTrain(trainId: string) {
-  return request<{ ok: true; trainId: string; teamIds: string[] }>(`/api/trains/${encodeURIComponent(trainId)}`, { method: 'DELETE' });
-}
-
-export function addTeamToTrain(trainId: string, teamId: string) {
-  return request<{ ok: true; train: Train; team: Team | null }>(`/api/trains/${encodeURIComponent(trainId)}/teams/${encodeURIComponent(teamId)}`, {
-    method: 'POST',
-  });
-}
-
-export function removeTeamFromTrain(trainId: string, teamId: string) {
-  return request<{ ok: true; train: Train; team: Team | null }>(`/api/trains/${encodeURIComponent(trainId)}/teams/${encodeURIComponent(teamId)}`, {
-    method: 'DELETE',
   });
 }
 
