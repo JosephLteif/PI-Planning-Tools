@@ -6,6 +6,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
 import { CapacityPage } from './components/CapacityPage';
 import { DeliveryBoardPage } from './components/DeliveryBoardPage';
+import { EmptyWorkspacePage } from './components/EmptyWorkspacePage';
 import { EstimatesPage } from './components/EstimatesPage';
 import { ResourcesPage } from './components/ResourcesPage';
 import { RoomsPage } from './components/RoomsPage';
@@ -37,6 +38,7 @@ export default function App() {
   const [roomPayload, setRoomPayload] = useState<RoomPayload | null>(null);
   const [view, setView] = useState<ViewKey>('estimates');
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
+  const [workspaceRefreshToken, setWorkspaceRefreshToken] = useState(0);
   const [saving, setSaving] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notice, setNotice] = useState('');
@@ -82,7 +84,16 @@ export default function App() {
         setRooms(nextRooms);
         const queryRoom = new URLSearchParams(window.location.search).get('room');
         const nextRoomId = nextRooms.some((room) => room.id === queryRoom) ? queryRoom! : nextRooms[0]?.id;
-        if (!nextRoomId) throw new Error('No planning room is available for this account.');
+        if (!nextRoomId) {
+          if (!active) return;
+          setSelectedRoomId('');
+          setRoomPayload(null);
+          setTeams([]);
+          setAdminUsers([]);
+          setDirectoryUsers([]);
+          window.history.replaceState({}, '', window.location.pathname);
+          return;
+        }
         const [payload, nextTeams, nextAdminUsers, nextDirectoryUsers] = await Promise.all([
           loadRoom(nextRoomId),
           listTeams(),
@@ -102,7 +113,7 @@ export default function App() {
       }
     })();
     return () => { active = false; };
-  }, [sessionStatus, user]);
+  }, [sessionStatus, user, workspaceRefreshToken]);
 
   useEffect(() => {
     if (sessionStatus !== 'signed-in' || !selectedRoomId) return undefined;
@@ -240,6 +251,11 @@ export default function App() {
     } finally {
       setLoadingWorkspace(false);
     }
+  }
+
+  function handleWorkspaceRefresh() {
+    setLoadingWorkspace(true);
+    setWorkspaceRefreshToken((current) => current + 1);
   }
 
   async function handleSave(nextState: RoomState) {
@@ -591,7 +607,10 @@ export default function App() {
 
   if (sessionStatus === 'loading') return <div className="pl-loading">Opening Pointline…</div>;
   if (sessionStatus === 'signed-out' || !user) return <AuthScreen error={authError} loading={authLoading} switchingAccount={authMode === 'switch-account'} onSubmit={handleLogin} />;
-  if (loadingWorkspace || !roomPayload || !selectedRoomId) return <div className="pl-loading">Loading your planning workspace…</div>;
+  if (loadingWorkspace) return <div className="pl-loading">Loading your planning workspace…</div>;
+  if (!roomPayload || !selectedRoomId) {
+    return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSwitchAccount={handleSwitchAccount} onSignOut={handleSignOut}><EmptyWorkspacePage onRefresh={handleWorkspaceRefresh} /></AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
+  }
 
   const room = roomPayload.room;
   const state = roomPayload.state;
