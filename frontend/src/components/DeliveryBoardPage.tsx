@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type DragEvent } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type DragEvent } from 'react';
 import type { CapacitySprint, Room, RoomState, Story, User } from '../types';
 import { cloneState } from '../state';
 import { sprintFeatureCapacity } from '../capacityUtils';
@@ -81,11 +81,13 @@ function DeliveryStoryCard({ story, epic, epicColor, sprintId, sprints, canEdit,
 export function DeliveryBoardPage({ room, state, user, saving, readOnly = false, onSave }: DeliveryBoardPageProps) {
   const [draggingStoryId, setDraggingStoryId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [focusedSprintId, setFocusedSprintId] = useState('');
   const [estimateSource, setEstimateSource] = useState<EstimateSource>('team');
   const canEdit = !readOnly && (room.role === 'owner' || room.role === 'admin' || user.role === 'admin');
   const aiEnabled = state.roomSettings.aiEnabled;
   const visibleEstimateSource: EstimateSource = aiEnabled ? estimateSource : 'team';
   const sprints = state.capacity.sprints;
+  const focusedSprint = sprints.find((sprint) => sprint.id === focusedSprintId) || sprints[0] || null;
   const assignments = state.capacity.storySprintIds || {};
   const stories = useMemo(() => state.stories.filter((story) => story.type !== 'Epic'), [state.stories]);
   const epics = useMemo(() => state.stories.filter((story) => story.type === 'Epic'), [state.stories]);
@@ -121,6 +123,14 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
   })), [sprints, state.capacity, storiesBySprint, visibleEstimateSource]);
   const plannedLoad = [...sprintMetrics.values()].reduce((total, metric) => total + metric.load, 0);
   const overloadedCount = [...sprintMetrics.values()].filter((metric) => metric.overloaded).length;
+
+  useEffect(() => {
+    if (!sprints.length) {
+      if (focusedSprintId) setFocusedSprintId('');
+      return;
+    }
+    if (!focusedSprintId || !sprints.some((sprint) => sprint.id === focusedSprintId)) setFocusedSprintId(sprints[0].id);
+  }, [focusedSprintId, sprints]);
 
   async function moveStory(storyId: string, sprintId: string | null) {
     if (!canEdit || saving) return;
@@ -199,7 +209,7 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
     <div className="management-content delivery-board-page">
       <div className="hero-row delivery-board-hero">
         <div><p className="eyebrow">Workspace · delivery planning</p><h1>Shape the delivery plan.</h1><p className="hero-copy">Place estimated stories into capacity sprints, keep load visible, and see when each epic will finish.</p>{readOnly ? <p className="modal-hint">Observers can view the board but cannot move stories.</p> : null}</div>
-        <div className="delivery-board-hero-note"><AppIcon name="kanban" size={19} /><span><strong>{canEdit ? 'Drag a story between sprints' : 'Delivery plan'}</strong><small>{saving ? 'Saving the latest move…' : 'Capacity is calculated from the room capacity plan.'}</small></span></div>
+        <div className="delivery-board-hero-note"><AppIcon name="kanban" size={19} /><span><strong>{canEdit ? 'Focus on one sprint at a time' : 'Delivery plan'}</strong><small>{saving ? 'Saving the latest move…' : 'Unplanned stays beside the selected sprint; use Move to for other sprints.'}</small></span></div>
       </div>
 
       <section className="card delivery-epic-card">
@@ -226,7 +236,13 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
         <div className={overloadedCount ? 'is-overloaded' : ''}><span>Over capacity</span><strong>{overloadedCount}</strong><small>{overloadedCount ? 'sprint needs attention' : 'all sprint loads fit'}</small></div>
       </div>
 
-      {sprints.length ? <div className="delivery-board-scroll"><div className="delivery-board-columns">{renderColumn(null)}{sprints.map((sprint) => renderColumn(sprint))}</div></div> : <section className="card empty-state delivery-no-sprints"><span className="empty-state-icon"><AppIcon name="gauge" size={22} /></span><h2>Add capacity sprints first</h2><p>Every capacity sprint will appear here as a delivery column. Open Capacity to add the first one.</p></section>}
+      {sprints.length ? <>
+        <div className="delivery-board-focusbar">
+          <div className="delivery-board-focus-copy"><span className="section-kicker">Board focus</span><strong>{focusedSprint?.name || 'Select a sprint'}</strong><small>{focusedSprint ? `${formatDate(focusedSprint.startDate)}${focusedSprint.endDate ? ` → ${formatDate(focusedSprint.endDate)}` : ''} · ${sprints.length} sprints available` : 'Choose a sprint to start planning.'}</small></div>
+          <label className="delivery-board-sprint-picker"><span>Show sprint</span><select value={focusedSprint?.id || ''} onChange={(event) => setFocusedSprintId(event.target.value)} aria-label="Show delivery sprint">{sprints.map((sprint) => <option value={sprint.id} key={sprint.id}>{sprint.name}</option>)}</select></label>
+        </div>
+        <div className="delivery-board-lanes">{renderColumn(null)}{focusedSprint ? renderColumn(focusedSprint) : null}</div>
+      </> : <section className="card empty-state delivery-no-sprints"><span className="empty-state-icon"><AppIcon name="gauge" size={22} /></span><h2>Add capacity sprints first</h2><p>Every capacity sprint will appear here as a delivery column. Open Capacity to add the first one.</p></section>}
     </div>
   );
 }
