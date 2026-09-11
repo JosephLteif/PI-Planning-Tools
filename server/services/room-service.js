@@ -229,6 +229,8 @@ export async function readRoomState(db, roomId, userId) {
       const vote = joined ? voteByPlayer.get(member.id) : null;
       const manual = joined ? parseScore(vote?.manual_estimate) : null;
       const ai = joined ? parseScore(vote?.ai_estimate) : null;
+      const hasSubmittedVote = manual !== null || ai !== null;
+      const canSeePlayerVote = canSeeAllVotes || member.id === userId || hasSubmittedVote;
       return {
         id: member.id,
         name: member.name,
@@ -237,8 +239,8 @@ export async function readRoomState(db, roomId, userId) {
         hasVoted: joined && (manual !== null || ai !== null),
         manualSubmitted: joined && manual !== null,
         aiSubmitted: joined && ai !== null,
-        manual: canSeeAllVotes || member.id === userId ? manual : null,
-        ai: aiVisible && (canSeeAllVotes || member.id === userId) ? ai : null,
+        manual: joined && canSeePlayerVote ? manual : null,
+        ai: aiVisible && joined && canSeePlayerVote ? ai : null,
         aiEnabled: aiVisible && vote?.ai_enabled === 1,
       };
     });

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Story } from '../types';
 import { AppIcon } from './AppIcon';
 
+type EpicPickerOption = {
+  id: string;
+  title: string;
+};
+
 type EpicPickerProps = {
-  epics: Story[];
+  epics: EpicPickerOption[];
   value: string;
   onChange: (epicId: string) => void;
   ariaLabel: string;
   allowEmpty?: boolean;
   emptyLabel?: string;
-  optionMeta?: (epic: Story) => string;
+  optionMeta?: (epic: EpicPickerOption) => string;
   className?: string;
   disabled?: boolean;
 };
