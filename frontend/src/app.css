@@ -216,7 +216,22 @@ html[data-theme='dark'] .ai-gain-chip { background: var(--surface); }
 .delivery-board-hero-note small { color: var(--ink-soft); font-size: 9px; line-height: 1.4; }
 .delivery-epic-card { margin-top: 20px; padding: 23px; }
 .delivery-epic-card .lower-card-heading { margin-bottom: 17px; }
-.delivery-epic-list { display: grid; gap: 7px; }
+.delivery-forecast-sprint-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.delivery-forecast-sprint { overflow: hidden; background: var(--canvas); border: 1px solid var(--line); border-radius: 9px; }
+.delivery-forecast-sprint.is-expanded { border-color: var(--blue); }
+.delivery-forecast-sprint-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 9px; align-items: center; width: 100%; min-height: 74px; padding: 11px 12px; color: inherit; text-align: left; background: transparent; border: 0; cursor: pointer; }
+.delivery-forecast-sprint-toggle:hover { background: var(--surface); }
+.delivery-forecast-sprint-icon { display: grid; width: 27px; height: 27px; color: var(--blue); background: var(--blue-soft); border-radius: 8px; place-items: center; }
+.delivery-forecast-sprint-copy { display: grid; gap: 3px; min-width: 0; }
+.delivery-forecast-sprint-copy strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.delivery-forecast-sprint-copy small { overflow: hidden; color: var(--ink-soft); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.delivery-forecast-sprint-count { display: grid; gap: 2px; min-width: 43px; text-align: right; }
+.delivery-forecast-sprint-count strong { color: var(--ink); font-family: 'Space Grotesk', sans-serif; font-size: 17px; }
+.delivery-forecast-sprint-count small { color: var(--ink-soft); font-size: 8px; font-weight: 700; text-transform: uppercase; }
+.delivery-forecast-sprint-chevron { display: grid; color: var(--blue); place-items: center; }
+.delivery-forecast-epics { display: grid; gap: 7px; padding: 0 10px 10px; }
+.delivery-forecast-epics .delivery-epic-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 11px; }
+.delivery-forecast-epics .delivery-epic-sprint { display: none; }
 .delivery-epic-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .55fr); gap: 18px; align-items: center; padding: 12px 13px; background: var(--canvas); border: 1px solid var(--line); border-left: 3px solid var(--delivery-epic-color); border-radius: 9px; }
 .delivery-epic-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .delivery-epic-name > div { display: grid; gap: 3px; min-width: 0; }
@@ -362,6 +377,7 @@ body.printing-resource-report > .resource-report { display: block !important; }
   .resource-report-table tr { break-inside: avoid; }
 }
 @media (max-width: 980px) { .delivery-board-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .delivery-board-hero-note { max-width: none; width: 100%; box-sizing: border-box; } .delivery-epic-row { grid-template-columns: 1fr; gap: 10px; } .delivery-board-focusbar { align-items: stretch; flex-direction: column; gap: 12px; } .delivery-board-sprint-picker { flex-basis: auto; width: 100%; } .delivery-board-lanes { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .delivery-forecast-sprint-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .delivery-board-hero-note { max-width: none; width: 100%; box-sizing: border-box; } .delivery-forecast-sprint-grid { grid-template-columns: 1fr; } .delivery-epic-row { grid-template-columns: 1fr; gap: 10px; } .delivery-board-focusbar { align-items: stretch; flex-direction: column; gap: 12px; } .delivery-board-sprint-picker { flex-basis: auto; width: 100%; } .delivery-board-lanes { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .delivery-epic-card { padding: 18px 15px; } .delivery-board-summary { gap: 6px; } .delivery-board-summary > div { padding: 10px; } .delivery-board-summary strong { font-size: 16px; } }
 

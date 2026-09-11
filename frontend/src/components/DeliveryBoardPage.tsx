@@ -82,6 +82,7 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
   const [draggingStoryId, setDraggingStoryId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [focusedSprintId, setFocusedSprintId] = useState('');
+  const [collapsedForecastSprintIds, setCollapsedForecastSprintIds] = useState<Set<string>>(() => new Set());
   const [estimateSource, setEstimateSource] = useState<EstimateSource>('team');
   const canEdit = !readOnly && (room.role === 'owner' || room.role === 'admin' || user.role === 'admin');
   const aiEnabled = state.roomSettings.aiEnabled;
@@ -115,6 +116,17 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
       color: EPIC_COLORS[index % EPIC_COLORS.length],
     };
   }), [assignments, epics, sprintIndex, sprints, stories]);
+  const epicForecastGroups = useMemo(() => {
+    const grouped = new Map(sprints.map((sprint) => [sprint.id, [] as typeof epicDelivery]));
+    const unplanned = [] as typeof epicDelivery;
+    epicDelivery.forEach((item) => {
+      const sprintId = item.deliverySprint?.id;
+      if (sprintId && grouped.has(sprintId)) grouped.get(sprintId)!.push(item);
+      else unplanned.push(item);
+    });
+    const groups = sprints.map((sprint) => ({ id: sprint.id, sprint, items: grouped.get(sprint.id) || [] }));
+    return unplanned.length ? [...groups, { id: 'unplanned', sprint: null, items: unplanned }] : groups;
+  }, [epicDelivery, sprints]);
   const sprintMetrics = useMemo(() => new Map(sprints.map((sprint) => {
     const sprintStories = storiesBySprint.get(sprint.id) || [];
     const load = sprintStories.reduce((total, story) => total + ((visibleEstimateSource === 'ai' ? story.ai : story.manual) ?? 0), 0);
@@ -213,13 +225,35 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
       </div>
 
       <section className="card delivery-epic-card">
-        <div className="lower-card-heading"><div><p className="section-kicker">Epic forecast</p><h2>Delivery sprint by epic</h2><p>The delivery sprint is the latest sprint containing one of the epic’s stories.</p></div><span className="story-progress">{epics.length} {epics.length === 1 ? 'epic' : 'epics'}</span></div>
-        {epicDelivery.length ? <div className="delivery-epic-list">{epicDelivery.map(({ epic, children, plannedCount, deliverySprint, color }) => (
-          <div className="delivery-epic-row" key={epic.id} style={epicStyle(color)}>
-            <div className="delivery-epic-name"><span className="delivery-epic-swatch" /><div><strong>{epic.title}</strong><span>{plannedCount}/{children.length} stories placed</span></div></div>
-            <div className="delivery-epic-sprint"><span>Delivery sprint</span><strong>{deliverySprint?.name || (children.length ? 'Not planned' : 'No stories')}</strong><small>{deliverySprint ? `${formatDate(deliverySprint.startDate)}${deliverySprint.endDate ? ` → ${formatDate(deliverySprint.endDate)}` : ''}` : 'Place a story to forecast this epic.'}</small></div>
-          </div>
-        ))}</div> : <div className="delivery-empty-inline">Create an Epic and link stories to it to see its delivery sprint here.</div>}
+        <div className="lower-card-heading"><div><p className="section-kicker">Epic forecast</p><h2>Delivery sprint by epic</h2><p>Every sprint opens with its forecast epics. Collapse a sprint to scan the summary tiles.</p></div><span className="story-progress">{epics.length} {epics.length === 1 ? 'epic' : 'epics'}</span></div>
+        {epicForecastGroups.length ? <div className="delivery-forecast-sprint-grid">{epicForecastGroups.map((group) => {
+          const expanded = !collapsedForecastSprintIds.has(group.id);
+          const label = group.sprint?.name || 'Unplanned';
+          const dateLabel = group.sprint ? `${formatDate(group.sprint.startDate)}${group.sprint.endDate ? ` → ${formatDate(group.sprint.endDate)}` : ''}` : 'No delivery sprint assigned';
+          return (
+            <article className={`delivery-forecast-sprint${expanded ? ' is-expanded' : ''}`} key={group.id}>
+              <button className="delivery-forecast-sprint-toggle" type="button" aria-expanded={expanded} onClick={() => setCollapsedForecastSprintIds((current) => {
+                const next = new Set(current);
+                if (next.has(group.id)) next.delete(group.id);
+                else next.add(group.id);
+                return next;
+              })}>
+                <span className="delivery-forecast-sprint-icon"><AppIcon name={group.sprint ? 'columns3' : 'inbox'} size={15} /></span>
+                <span className="delivery-forecast-sprint-copy"><span className="section-kicker">{group.sprint ? 'Sprint' : 'Forecast'}</span><strong>{label}</strong><small>{dateLabel}</small></span>
+                <span className="delivery-forecast-sprint-count"><strong>{group.items.length}</strong><small>{group.items.length === 1 ? 'deliverable' : 'deliverables'}</small></span>
+                <span className="delivery-forecast-sprint-chevron"><AppIcon name={expanded ? 'chevronDown' : 'chevronRight'} size={14} /></span>
+              </button>
+              {expanded ? <div className="delivery-forecast-epics">
+                {group.items.length ? group.items.map(({ epic, children, plannedCount, deliverySprint, color }) => (
+                  <div className="delivery-epic-row" key={epic.id} style={epicStyle(color)}>
+                    <div className="delivery-epic-name"><span className="delivery-epic-swatch" /><div><strong>{epic.title}</strong><span>{plannedCount}/{children.length} stories placed</span></div></div>
+                    <div className="delivery-epic-sprint"><span>Delivery sprint</span><strong>{deliverySprint?.name || (children.length ? 'Not planned' : 'No stories')}</strong><small>{deliverySprint ? `${formatDate(deliverySprint.startDate)}${deliverySprint.endDate ? ` → ${formatDate(deliverySprint.endDate)}` : ''}` : 'Place a story to forecast this epic.'}</small></div>
+                  </div>
+                )) : <div className="delivery-empty-inline">No epics are forecast for this sprint yet.</div>}
+              </div> : null}
+            </article>
+          );
+        })}</div> : <div className="delivery-empty-inline">Create an Epic and link stories to it to see its delivery sprint here.</div>}
       </section>
 
       {aiEnabled ? <div className="delivery-board-toolbar">
