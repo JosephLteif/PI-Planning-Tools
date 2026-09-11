@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, listAdminUsers, listDirectoryUsers, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, joinRoom, listAdminUsers, listDirectoryUsers, listDiscoverableRooms, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AppIcon } from './components/AppIcon';
 import { AuthScreen } from './components/AuthScreen';
@@ -13,7 +13,7 @@ import { RoomsPage } from './components/RoomsPage';
 import { TeamPage } from './components/TeamPage';
 import { SettingsPage } from './components/WorkspacePage';
 import { defaultRoomState } from './state';
-import type { Room, RoomPayload, RoomState, Team, User } from './types';
+import type { DiscoverableRoom, Room, RoomPayload, RoomState, Team, User } from './types';
 import './app.css';
 
 type SessionStatus = 'loading' | 'signed-out' | 'signed-in';
@@ -31,6 +31,10 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [discoverableRooms, setDiscoverableRooms] = useState<DiscoverableRoom[]>([]);
+  const [discoverableHasMore, setDiscoverableHasMore] = useState(false);
+  const [discoverableLoading, setDiscoverableLoading] = useState(false);
+  const [discoverableQuery, setDiscoverableQuery] = useState('');
   const [teams, setTeams] = useState<Team[]>([]);
   const [directoryUsers, setDirectoryUsers] = useState<User[]>([]);
   const [adminUsers, setAdminUsers] = useState<import('./types').AdminUser[]>([]);
@@ -86,6 +90,10 @@ export default function App() {
         const nextRoomId = nextRooms.some((room) => room.id === queryRoom) ? queryRoom! : nextRooms[0]?.id;
         if (!nextRoomId) {
           if (!active) return;
+          const nextDiscoverablePage = await listDiscoverableRooms();
+          if (!active) return;
+          setDiscoverableRooms(nextDiscoverablePage.rooms);
+          setDiscoverableHasMore(nextDiscoverablePage.hasMore);
           setSelectedRoomId('');
           setRoomPayload(null);
           setTeams([]);
@@ -94,6 +102,9 @@ export default function App() {
           window.history.replaceState({}, '', window.location.pathname);
           return;
         }
+        setDiscoverableRooms([]);
+        setDiscoverableHasMore(false);
+        setDiscoverableQuery('');
         const [payload, nextTeams, nextAdminUsers, nextDirectoryUsers] = await Promise.all([
           loadRoom(nextRoomId),
           listTeams(),
@@ -208,6 +219,9 @@ export default function App() {
     try { await logout(); } catch { /* A local session can still be cleared when the server is unavailable. */ }
     setUser(null);
     setRooms([]);
+    setDiscoverableRooms([]);
+    setDiscoverableHasMore(false);
+    setDiscoverableQuery('');
     setTeams([]);
     setDirectoryUsers([]);
     setAdminUsers([]);
@@ -222,6 +236,9 @@ export default function App() {
     try { await logout(); } catch { /* A local session can still be cleared when the server is unavailable. */ }
     setUser(null);
     setRooms([]);
+    setDiscoverableRooms([]);
+    setDiscoverableHasMore(false);
+    setDiscoverableQuery('');
     setTeams([]);
     setDirectoryUsers([]);
     setAdminUsers([]);
@@ -255,7 +272,68 @@ export default function App() {
 
   function handleWorkspaceRefresh() {
     setLoadingWorkspace(true);
+    setDiscoverableRooms([]);
+    setDiscoverableHasMore(false);
+    setDiscoverableQuery('');
     setWorkspaceRefreshToken((current) => current + 1);
+  }
+
+  async function handleDiscoverableSearch(query: string) {
+    const normalizedQuery = query.trim();
+    setDiscoverableQuery(normalizedQuery);
+    setDiscoverableLoading(true);
+    try {
+      const page = await listDiscoverableRooms(normalizedQuery);
+      setDiscoverableRooms(page.rooms);
+      setDiscoverableHasMore(page.hasMore);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setDiscoverableLoading(false);
+    }
+  }
+
+  async function handleDiscoverableLoadMore() {
+    if (discoverableLoading || !discoverableHasMore) return;
+    setDiscoverableLoading(true);
+    try {
+      const page = await listDiscoverableRooms(discoverableQuery, discoverableRooms.length);
+      setDiscoverableRooms((current) => [...current, ...page.rooms]);
+      setDiscoverableHasMore(page.hasMore);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setDiscoverableLoading(false);
+    }
+  }
+
+  async function handleJoinRoom(roomId: string) {
+    setSaving(true);
+    try {
+      const payload = await joinRoom(roomId);
+      const [nextRooms, nextTeams, nextDirectoryUsers, nextAdminUsers] = await Promise.all([
+        listRooms(),
+        listTeams(),
+        listDirectoryUsers(),
+        user?.role === 'admin' ? listAdminUsers(roomId) : Promise.resolve([]),
+      ]);
+      setRooms(nextRooms);
+      setDiscoverableRooms([]);
+      setDiscoverableHasMore(false);
+      setDiscoverableQuery('');
+      setSelectedRoomId(payload.room.id);
+      setRoomPayload(payload);
+      setTeams(nextTeams);
+      setDirectoryUsers(nextDirectoryUsers);
+      setAdminUsers(nextAdminUsers);
+      setView('estimates');
+      window.history.replaceState({}, '', `?room=${encodeURIComponent(payload.room.id)}`);
+      setNotice(`Joined ${payload.room.name}`);
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSave(nextState: RoomState) {
@@ -609,7 +687,7 @@ export default function App() {
   if (sessionStatus === 'signed-out' || !user) return <AuthScreen error={authError} loading={authLoading} switchingAccount={authMode === 'switch-account'} onSubmit={handleLogin} />;
   if (loadingWorkspace) return <div className="pl-loading">Loading your planning workspace…</div>;
   if (!roomPayload || !selectedRoomId) {
-    return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSwitchAccount={handleSwitchAccount} onSignOut={handleSignOut}><EmptyWorkspacePage onRefresh={handleWorkspaceRefresh} /></AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
+    return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSwitchAccount={handleSwitchAccount} onSignOut={handleSignOut}><EmptyWorkspacePage rooms={discoverableRooms} saving={saving} loading={discoverableLoading} hasMore={discoverableHasMore} query={discoverableQuery} onJoin={handleJoinRoom} onSearch={handleDiscoverableSearch} onLoadMore={handleDiscoverableLoadMore} onRefresh={handleWorkspaceRefresh} /></AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
   }
 
   const room = roomPayload.room;

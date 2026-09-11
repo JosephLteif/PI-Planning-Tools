@@ -185,8 +185,24 @@ html[data-theme='dark'] .ai-gain-chip { background: var(--surface); }
 .empty-workspace-card h1 { margin: 8px 0 10px; color: var(--ink); font-family: 'Space Grotesk', sans-serif; font-size: clamp(25px, 4vw, 34px); letter-spacing: -.05em; }
 .empty-workspace-card > p:not(.section-kicker) { max-width: 410px; margin: 0 auto; color: var(--ink-muted); font-size: 12px; line-height: 1.7; }
 .empty-workspace-card .primary-button { justify-self: center; margin-top: 24px; }
+.discoverable-room-toolbar { display: grid; gap: 12px; width: min(100%, 460px); margin: 24px auto 0; text-align: left; }
+.discoverable-room-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.discoverable-room-heading strong { color: var(--ink); font-size: 12px; }
+.discoverable-room-heading span { color: var(--ink-soft); font-size: 10px; }
+.discoverable-room-search { display: flex; gap: 8px; }
+.discoverable-room-search .modal-input { min-width: 0; flex: 1; }
+.discoverable-room-search .outline-button { flex: 0 0 auto; }
+.discoverable-room-list { display: grid; gap: 9px; width: min(100%, 460px); margin: 24px auto 0; text-align: left; }
+.discoverable-room { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+.discoverable-room-copy { display: grid; min-width: 0; gap: 4px; }
+.discoverable-room-copy strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.discoverable-room-copy span { color: var(--ink-soft); font-size: 10px; }
+.discoverable-room .primary-button { flex: 0 0 auto; margin-top: 0; padding: 8px 11px; }
+.discoverable-room-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; color: var(--ink-soft); border: 1px dashed var(--line); border-radius: 11px; font-size: 11px; line-height: 1.5; }
+.discoverable-room-load-more { justify-self: center; margin-top: 14px; }
+.empty-workspace-refresh { justify-self: center; margin-top: 14px; }
 .empty-workspace-help { display: flex; justify-content: center; gap: 7px; align-items: center; margin-top: 25px; padding-top: 16px; color: var(--ink-soft); border-top: 1px solid var(--line); font-size: 10px; line-height: 1.5; }
-@media (max-width: 480px) { .empty-workspace-page { min-height: min(580px, calc(100vh - 90px)); } .empty-workspace-card { padding: 28px 20px; } .empty-workspace-help { align-items: flex-start; text-align: left; } }
+@media (max-width: 480px) { .empty-workspace-page { min-height: min(580px, calc(100vh - 90px)); } .empty-workspace-card { padding: 28px 20px; } .empty-workspace-help { align-items: flex-start; text-align: left; } .discoverable-room-heading { align-items: flex-start; flex-direction: column; gap: 4px; } .discoverable-room-search { align-items: stretch; flex-direction: column; } .discoverable-room-search .outline-button { justify-content: center; } .discoverable-room { align-items: flex-start; flex-direction: column; } .discoverable-room .primary-button { width: 100%; } }
 @media (max-width: 480px) { .card-heading-controls { justify-content: stretch; width: 100%; } .card-heading-controls > .sequence-control { width: 100%; justify-content: space-between; } .story-switch-control { align-items: flex-start; flex-direction: column; gap: 5px; } .story-switch-select { width: 100%; } }
 .pl-toast { position: fixed; right: 24px; bottom: 24px; z-index: 10; max-width: 360px; padding: 12px 15px; color: #fff; background: var(--navy); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; box-shadow: var(--shadow); font-size: 12px; }
 .delivery-board-hero { gap: 20px; }

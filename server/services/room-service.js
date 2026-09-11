@@ -479,6 +479,56 @@ export async function readRooms(db, user) {
   }));
 }
 
+export async function readDiscoverableRooms(db, user, options = {}) {
+  const requestedLimit = Number(options.limit);
+  const requestedOffset = Number(options.offset);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(50, Math.max(1, requestedLimit)) : 20;
+  const offset = Number.isInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
+  const search = cleanText(options.query, '', 80).toLowerCase();
+  const searchClause = search ? 'AND (LOWER(r.name) LIKE ? OR LOWER(r.pi_label) LIKE ?)' : '';
+  const bindings = search
+    ? [user.id, `%${search}%`, `%${search}%`, limit + 1, offset]
+    : [user.id, limit + 1, offset];
+  const result = await db.prepare(`SELECT r.id, r.name, r.pi_label, r.updated_at,
+      COUNT(all_members.account_id) AS member_count,
+      (SELECT COUNT(DISTINCT tm.team_id)
+        FROM team_members tm JOIN room_members team_members ON team_members.account_id = tm.account_id
+        WHERE team_members.room_id = r.id) AS team_count
+    FROM rooms r
+    LEFT JOIN room_members all_members ON all_members.room_id = r.id
+    WHERE NOT EXISTS (SELECT 1 FROM room_members mine WHERE mine.room_id = r.id AND mine.account_id = ?)
+      ${searchClause}
+    GROUP BY r.id, r.name, r.pi_label, r.updated_at
+    ORDER BY r.updated_at DESC, r.id
+    LIMIT ? OFFSET ?`).bind(...bindings).all();
+  const roomRows = rows(result);
+  return {
+    hasMore: roomRows.length > limit,
+    rooms: roomRows.slice(0, limit).map((room) => ({
+    id: room.id,
+    name: room.name,
+    piLabel: room.pi_label,
+    memberCount: Math.max(0, Number(room.member_count) || 0),
+    teamCount: Math.max(0, Number(room.team_count) || 0),
+    })),
+  };
+}
+
+export async function joinRoom(db, user, roomId) {
+  const room = await db.prepare('SELECT id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
+  if (!room) throw authError('Room not found', 404);
+  const membership = await db.prepare('SELECT 1 AS member FROM room_members WHERE room_id = ? AND account_id = ? LIMIT 1').bind(roomId, user.id).first();
+  if (!membership) {
+    const now = new Date().toISOString();
+    await db.batch([
+      db.prepare(`INSERT INTO room_members (room_id, account_id, role, created_at)
+        VALUES (?, ?, 'developer', ?) ON CONFLICT DO NOTHING`).bind(roomId, user.id, now),
+      db.prepare('UPDATE rooms SET state_version = state_version + 1, updated_at = ? WHERE id = ?').bind(now, roomId),
+    ]);
+  }
+  return readRoomState(db, roomId, user.id);
+}
+
 export async function runBatches(db, statements) {
   for (let index = 0; index < statements.length; index += 50) {
     await db.batch(statements.slice(index, index + 50));

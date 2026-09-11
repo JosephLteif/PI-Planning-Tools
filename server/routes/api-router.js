@@ -28,9 +28,11 @@ import {
   createRoomWebSocket,
   createRoomStream,
   deleteRoom,
+  joinRoom,
   removeRoomMember,
   removeRoomTeam,
   publishRoomState,
+  readDiscoverableRooms,
   readRoomState,
   readRooms,
   saveRoomState,
@@ -172,6 +174,21 @@ export async function handleApiRequest(request, env) {
 
   if (url.pathname === '/api/rooms' && request.method === 'GET') {
     return json({ rooms: await readRooms(env.DB, user) });
+  }
+  if (url.pathname === '/api/rooms/discoverable' && request.method === 'GET') {
+    return json(await readDiscoverableRooms(env.DB, user, {
+      query: url.searchParams.get('q') || '',
+      limit: url.searchParams.get('limit') || '',
+      offset: url.searchParams.get('offset') || '',
+    }));
+  }
+
+  const roomJoinPathMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/join$/);
+  if (roomJoinPathMatch && request.method === 'POST') {
+    const targetRoomId = decodeURIComponent(roomJoinPathMatch[1]);
+    const room = await joinRoom(env.DB, user, targetRoomId);
+    await publishRoomState(env.DB, targetRoomId);
+    return json({ ok: true, roomId: targetRoomId, ...room });
   }
 
   await requireMember(env.DB, roomId, user);

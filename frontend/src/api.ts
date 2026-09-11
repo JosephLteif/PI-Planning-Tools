@@ -1,4 +1,4 @@
-import type { AdminUser, Room, RoomPayload, RoomState, Team, User } from './types';
+import type { AdminUser, DiscoverableRoomPage, Room, RoomPayload, RoomState, Team, User } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -79,6 +79,20 @@ export function logout(): Promise<unknown> {
 
 export async function listRooms(): Promise<Room[]> {
   return (await request<{ rooms: Room[] }>('/api/rooms')).rooms;
+}
+
+export async function listDiscoverableRooms(query = '', offset = 0): Promise<DiscoverableRoomPage> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set('q', query.trim());
+  if (offset > 0) params.set('offset', String(offset));
+  const suffix = params.toString();
+  return request<DiscoverableRoomPage>(`/api/rooms/discoverable${suffix ? `?${suffix}` : ''}`);
+}
+
+export function joinRoom(roomId: string): Promise<RoomPayload> {
+  return request<RoomPayload & { ok: true }>(`/api/rooms/${encodeURIComponent(roomId)}/join`, {
+    method: 'POST',
+  }).then(normalizeRoomPayload);
 }
 
 export async function loadRoom(roomId: string): Promise<RoomPayload> {

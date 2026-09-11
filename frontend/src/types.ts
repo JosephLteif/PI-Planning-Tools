@@ -37,6 +37,19 @@ export type Room = {
   teams?: RoomTeam[];
 };
 
+export type DiscoverableRoom = {
+  id: string;
+  name: string;
+  piLabel: string;
+  memberCount: number;
+  teamCount: number;
+};
+
+export type DiscoverableRoomPage = {
+  rooms: DiscoverableRoom[];
+  hasMore: boolean;
+};
+
 export type TeamMember = {
   id: string;
   name: string;

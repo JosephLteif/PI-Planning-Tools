@@ -40,6 +40,8 @@ export const rooms = sqliteTable('rooms', {
   capacityJson: text('capacity_json').notNull().default('{}'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  roomsUpdatedAtIdx: index('rooms_updated_at_idx').on(table.updatedAt),
 });
 
 export const roomMembers = sqliteTable('room_members', {
@@ -49,6 +51,7 @@ export const roomMembers = sqliteTable('room_members', {
   createdAt: text('created_at').notNull(),
 }, (table) => ({
   roomMembersPk: primaryKey({ columns: [table.roomId, table.accountId] }),
+  roomMembersAccountIdx: index('room_members_account_idx').on(table.accountId),
 }));
 
 export const teams = sqliteTable('teams', {
