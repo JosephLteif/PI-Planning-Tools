@@ -20,7 +20,7 @@ type AppShellProps = {
 };
 
 const primaryNavigation: Array<{ key: ViewKey; label: string; icon: AppIconName }> = [
-  { key: 'estimates', label: 'Estimates', icon: 'layout' },
+  { key: 'estimates', label: 'Dashboard', icon: 'layout' },
   { key: 'vote', label: 'Vote', icon: 'circleDot' },
   { key: 'board', label: 'Delivery board', icon: 'kanban' },
   { key: 'capacity', label: 'Capacity', icon: 'gauge' },
@@ -113,7 +113,7 @@ export function AppShell({
       </aside>
       <main className="main-area">
         <div className="topbar">
-          <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Estimates' : view === 'vote' ? 'Vote' : view === 'settings' ? 'Room settings' : view === 'board' ? 'Delivery board' : view[0].toUpperCase() + view.slice(1)}</span></div>
+          <div className="breadcrumbs"><span>Workspace</span><AppIcon name="chevronRight" size={13} /><span>{view === 'estimates' ? 'Dashboard' : view === 'vote' ? 'Vote' : view === 'settings' ? 'Room settings' : view === 'board' ? 'Delivery board' : view[0].toUpperCase() + view.slice(1)}</span></div>
           <div className="topbar-actions">
             <div className="account-menu" ref={accountMenuRef}>
               <button className="account-menu-trigger" type="button" aria-label="Account menu" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((current) => !current)}>

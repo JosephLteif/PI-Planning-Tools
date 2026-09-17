@@ -413,7 +413,7 @@ export function EstimatesPage({ room, state, user, focusMode = false, saving, on
            }) : <div className="voting-roster-empty">No one has joined this round yet.</div>}</div></div>
          </>}
        </section>
-       {!focusMode ? <StoryQueue stories={state.stories} selectedId={selectedStory.id} canManage={canManage} aiEnabled={aiEnabled} sessionActive={sessionActive} storySelectionDisabled={sessionActive && !canManage} sessionPaused={isPaused} onSelect={selectStory} onNew={(type) => editStory(null, type)} onImport={() => setModal({ kind: 'import' })} onEdit={(story) => editStory(story)} onMove={(id, direction) => void moveStory(id, direction)} onDelete={(story) => void deleteStory(story)} onRevote={(story) => void revoteStory(story)} /> : null}
+       <StoryQueue stories={state.stories} selectedId={selectedStory.id} canManage={canManage} aiEnabled={aiEnabled} sessionActive={sessionActive} storySelectionDisabled={sessionActive && !canManage} sessionPaused={isPaused} onSelect={selectStory} onNew={(type) => editStory(null, type)} onImport={() => setModal({ kind: 'import' })} onEdit={(story) => editStory(story)} onMove={(id, direction) => void moveStory(id, direction)} onDelete={(story) => void deleteStory(story)} onRevote={(story) => void revoteStory(story)} />
      </div>
     {modal?.kind === 'edit' ? <StoryEditorModal key={`${modal.story?.id || 'new'}-${modal.type || ''}`} state={state} story={modal.story} initialType={modal.type} saving={saving} onClose={() => setModal(null)} onSave={saveStory} /> : null}
     {modal?.kind === 'import' ? <ImportStoriesModal epics={state.stories.filter((story) => story.type === 'Epic')} saving={saving} onClose={() => setModal(null)} onImport={importStories} /> : null}

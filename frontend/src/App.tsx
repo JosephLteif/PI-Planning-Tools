@@ -5,6 +5,7 @@ import { AppIcon } from './components/AppIcon';
 import { AuthScreen } from './components/AuthScreen';
 import { AppShell, type ViewKey } from './components/AppShell';
 import { CapacityPage } from './components/CapacityPage';
+import { DashboardPage } from './components/DashboardPage';
 import { DeliveryBoardPage } from './components/DeliveryBoardPage';
 import { EmptyWorkspacePage } from './components/EmptyWorkspacePage';
 import { EstimatesPage } from './components/EstimatesPage';
@@ -698,7 +699,7 @@ export default function App() {
     : view === 'vote'
       ? <EstimatesPage room={room} state={state} user={user} focusMode saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
       : view === 'estimates'
-        ? <EstimatesPage room={room} state={state} user={user} saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
+        ? <DashboardPage room={room} state={state} />
       : view === 'rooms'
         ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
