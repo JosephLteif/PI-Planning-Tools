@@ -1182,6 +1182,8 @@ h1 {
 .queue-header-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 4px;
   margin-top: -6px;
 }
@@ -1220,6 +1222,56 @@ h1 {
 
 .queue-header .icon-button {
   margin-top: 0;
+}
+
+.queue-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 9px;
+  color: var(--ink-muted);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.queue-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.queue-card-collapsed .queue-header {
+  border-bottom: 0;
+}
+
+.queue-collapsed-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 22px 20px;
+  padding: 11px 12px;
+  color: var(--ink-soft);
+  background: var(--canvas);
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.queue-collapsed-note svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.voting-page-grid {
+  grid-template-columns: minmax(0, 900px);
+  justify-content: center;
+}
+
+.voting-page-hero {
+  margin-bottom: 22px;
 }
 
 .story-list {

@@ -695,8 +695,10 @@ export default function App() {
   const isObserver = room.members?.some((member) => member.id === user.id && member.role === 'observer') === true;
   const content = !state
     ? <section className="card pl-placeholder"><div className="sidebar-tip-icon"><AppIcon name="listChecks" size={22} /></div><h2>This room is ready for its first story</h2><p>Initialize the room with a starter story, then invite the team into the first estimation round.</p>{isObserver ? <p className="modal-hint">Observers can view the room once it has been initialized by a room manager.</p> : <button className="primary-button" type="button" disabled={saving} onClick={() => void handleSave(defaultRoomState())}>Initialize room</button>}</section>
-    : view === 'estimates'
-      ? <EstimatesPage room={room} state={state} user={user} saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
+    : view === 'vote'
+      ? <EstimatesPage room={room} state={state} user={user} focusMode saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
+      : view === 'estimates'
+        ? <EstimatesPage room={room} state={state} user={user} saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
       : view === 'rooms'
         ? <RoomsPage rooms={rooms} currentRoom={room} selectedRoomId={selectedRoomId} saving={saving} onCreate={handleCreateRoom} onSelect={handleRoomChange} onDelete={handleDeleteRoom} onUpdate={handleUpdateRoom} onRemoveMember={handleRemoveRoomMember} onRemoveTeam={handleRemoveRoomTeam} directoryUsers={directoryUsers} teams={teams} canManage={room.role === 'owner' || room.role === 'admin' || user.role === 'admin'} onAddMember={handleAddRoomMember} onInvite={(kind, teamId) => handleCreateInvite(teamId, kind)} />
         : view === 'team'
