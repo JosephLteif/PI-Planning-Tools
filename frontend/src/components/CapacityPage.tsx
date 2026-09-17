@@ -85,6 +85,7 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [selectedSprintId, setSelectedSprintId] = useState('');
   const canEdit = !readOnly && (room.role === 'owner' || room.role === 'admin' || user.role === 'admin');
+  const canEditMember = (memberId: string) => !readOnly && (canEdit || memberId === user.id);
   const capacity = state.capacity;
   const members = capacity.members;
   const included = capacity.sprints.filter((sprint) => !sprint.excludeFromTotal);
@@ -100,7 +101,7 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
   }
 
   function updateSprintAvailability(sprintId: string, memberId: string, rawValue: string) {
-    if (!canEdit) return;
+    if (!canEditMember(memberId)) return;
     const trimmedValue = rawValue.trim();
     const parsedValue = Number(trimmedValue);
     const value = trimmedValue === '' ? null : Number.isFinite(parsedValue) ? Math.min(366, Math.max(0, parsedValue)) : 0;
@@ -159,21 +160,21 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
             <div><p className="section-kicker">Team assumptions</p><h2>Members and offices</h2></div>
             <label className="capacity-member-filter"><span>Member</span><select className="modal-input" value={activeMemberId} onChange={(event) => setSelectedMemberId(event.target.value)} aria-label="Filter capacity by member"><option value="">All members</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
           </div>
-          <p className="settings-copy">Set each member’s office and base train/staff development capacity. Use the member filter to focus the sprint details below.</p>
+          <p className="settings-copy">Set your own office, train/staff development, and sprint availability. Room managers can edit the whole team.</p>
           <div className="capacity-member-list">
             {visibleMembers.map((member) => (
               <div className="capacity-member-row" key={member.id}>
                 <div><strong>{member.name}</strong><small>Derived dev: {Math.round(Math.max(0, member.trainStaffDevCapacityPct - capacity.defaults.ceremoniesPct) * 100)}%</small></div>
                 <label>
                   <span>Office</span>
-                  <select className="modal-input" disabled={!canEdit || saving} defaultValue={member.office} onChange={(event) => saveCapacity((next) => { const target = next.capacity.members.find((item) => item.id === member.id); if (target) target.office = event.target.value as 'beirut' | 'cyprus'; })}>
+                  <select className="modal-input" disabled={!canEditMember(member.id) || saving} defaultValue={member.office} onChange={(event) => saveCapacity((next) => { const target = next.capacity.members.find((item) => item.id === member.id); if (target) target.office = event.target.value as 'beirut' | 'cyprus'; })}>
                     <option value="beirut">Beirut</option>
                     <option value="cyprus">Cyprus</option>
                   </select>
                 </label>
                 <label>
                   <span>Train/staff dev %</span>
-                  <input className="modal-input" type="number" min="0" max="100" step="1" disabled={!canEdit || saving} defaultValue={Math.round(member.trainStaffDevCapacityPct * 100)} onBlur={(event) => saveCapacity((next) => { const target = next.capacity.members.find((item) => item.id === member.id); if (target) target.trainStaffDevCapacityPct = Math.min(1, Math.max(0, Number(event.target.value) / 100)); })} />
+                  <input className="modal-input" type="number" min="0" max="100" step="1" disabled={!canEditMember(member.id) || saving} defaultValue={Math.round(member.trainStaffDevCapacityPct * 100)} onBlur={(event) => saveCapacity((next) => { const target = next.capacity.members.find((item) => item.id === member.id); if (target) target.trainStaffDevCapacityPct = Math.min(1, Math.max(0, Number(event.target.value) / 100)); })} />
                 </label>
               </div>
             ))}
@@ -221,7 +222,7 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
                   <span className="capacity-sprint-person-office">{member.office === 'cyprus' ? 'Cyprus' : 'Beirut'}</span>
                   <div className="capacity-sprint-person-dev"><strong>{Math.round(member.trainStaffDevCapacityPct * 100)}%</strong><small>Derived {Math.round(details.devPct * 100)}%</small></div>
                   <label className="capacity-sprint-availability-field">
-                    <span className="capacity-sprint-availability-input"><input key={`${member.id}-${selectedSprint.availabilityDays[member.id] ?? `calculated-${details.availability}`}`} className="compact-input" type="number" min="0" max="366" step="1" defaultValue={details.availability} disabled={!canEdit || saving} onBlur={(event) => updateSprintAvailability(selectedSprint.id, member.id, event.target.value)} aria-label={`${member.name} available days for ${selectedSprint.name}`} /><span>days</span></span>
+                    <span className="capacity-sprint-availability-input"><input key={`${member.id}-${selectedSprint.availabilityDays[member.id] ?? `calculated-${details.availability}`}`} className="compact-input" type="number" min="0" max="366" step="1" defaultValue={details.availability} disabled={!canEditMember(member.id) || saving} onBlur={(event) => updateSprintAvailability(selectedSprint.id, member.id, event.target.value)} aria-label={`${member.name} available days for ${selectedSprint.name}`} /><span>days</span></span>
                     <small>{hasOverride ? 'override' : 'calculated'}</small>
                   </label>
                 </div>;

@@ -535,6 +535,42 @@ export async function runBatches(db, statements) {
   }
 }
 
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isOwnCapacityUpdate(current, requested, accountId) {
+  const { capacity: currentCapacity, ...currentState } = current;
+  const { capacity: requestedCapacity, ...requestedState } = requested;
+  const storySelectionChanged = currentState.selectedStoryId !== requestedState.selectedStoryId || currentState.round?.storyId !== requestedState.round?.storyId;
+  if (storySelectionChanged && !['idle', 'paused'].includes(currentState.round?.phase)) return false;
+  const comparableState = (state) => ({ ...state, selectedStoryId: null, round: { ...state.round, storyId: null } });
+  if (!currentCapacity || !requestedCapacity || !sameJson(comparableState(currentState), comparableState(requestedState))) return false;
+  if (!sameJson(currentCapacity.defaults, requestedCapacity.defaults) || !sameJson(currentCapacity.storySprintIds, requestedCapacity.storySprintIds)) return false;
+
+  const currentMembers = new Map(currentCapacity.members.map((member) => [member.id, member]));
+  const requestedMembers = new Map(requestedCapacity.members.map((member) => [member.id, member]));
+  if (currentMembers.size !== requestedMembers.size) return false;
+  for (const [memberId, currentMember] of currentMembers) {
+    const requestedMember = requestedMembers.get(memberId);
+    if (!requestedMember || currentMember.id !== requestedMember.id || currentMember.name !== requestedMember.name) return false;
+    if (memberId !== accountId && !sameJson(currentMember, requestedMember)) return false;
+  }
+
+  if (currentCapacity.sprints.length !== requestedCapacity.sprints.length) return false;
+  for (const currentSprint of currentCapacity.sprints) {
+    const requestedSprint = requestedCapacity.sprints.find((sprint) => sprint.id === currentSprint.id);
+    if (!requestedSprint) return false;
+    const { availabilityDays: currentAvailability, ...currentSprintDetails } = currentSprint;
+    const { availabilityDays: requestedAvailability, ...requestedSprintDetails } = requestedSprint;
+    if (!sameJson(currentSprintDetails, requestedSprintDetails)) return false;
+    const unchangedAvailability = Object.fromEntries(Object.entries(currentAvailability).filter(([memberId]) => memberId !== accountId));
+    const requestedUnchangedAvailability = Object.fromEntries(Object.entries(requestedAvailability).filter(([memberId]) => memberId !== accountId));
+    if (!sameJson(unchangedAvailability, requestedUnchangedAvailability)) return false;
+  }
+  return true;
+}
+
 export async function saveRoomState(db, roomId, input, user) {
   const room = await db.prepare('SELECT state_version, owner_account_id FROM rooms WHERE id = ? LIMIT 1').bind(roomId).first();
   if (!room) {
@@ -583,6 +619,15 @@ export async function saveRoomState(db, roomId, input, user) {
     throw error;
   }
 
+  const roomManager = await canManageRoom(db, roomId, user);
+  if (!roomManager) {
+    const currentPayload = await readRoomState(db, roomId, user.id);
+    const currentSource = currentPayload.state ? normalizeStateInput(currentPayload.state, capacityRoster) : null;
+    if (!currentSource || !isOwnCapacityUpdate(currentSource, source, user.id)) {
+      throw authError('You can only edit your own capacity in this room', 403);
+    }
+  }
+
   const currentRound = await db.prepare(`SELECT story_key, round_number, phase, mode, revealed_at, timer_ends_at, timer_started_at
     FROM planning_rounds WHERE room_id = ? AND story_key = ? ORDER BY round_number DESC LIMIT 1`)
     .bind(roomId, source.round.storyId)
@@ -595,7 +640,7 @@ export async function saveRoomState(db, roomId, input, user) {
       || (currentRound.revealed_at || null) !== (source.round.revealedAt || null)
       || (currentRound.timer_started_at || null) !== (source.round.timerStartedAt || null)
     : source.round.phase !== 'idle' || source.round.timerEndsAt !== null;
-  if (roundChanged && !(await canManageRoom(db, roomId, user))) {
+  if (roundChanged && !roomManager) {
     throw authError('Only the room owner or an admin can manage the voting round', 403);
   }
 
