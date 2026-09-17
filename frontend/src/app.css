@@ -40,7 +40,7 @@
 .session-gate.session-paused .session-gate-icon { color: #9a6a00; background: #fff0c7; }
 .session-gate h3 { margin: 4px 0 5px; font-size: 16px; letter-spacing: -.03em; }
 .session-gate p:not(.section-kicker) { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
-.round-next-epic-select { min-width: 150px; padding: 8px 25px 8px 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; font-size: 10px; font-weight: 700; }
+.round-next-epic-select, .round-next-story-select { min-width: 150px; padding: 8px 25px 8px 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; font-size: 10px; font-weight: 700; }
 .round-next-copy { color: var(--ink-soft); font-size: 10px; font-weight: 700; white-space: nowrap; }
 .estimate-fields.team-only { grid-template-columns: minmax(0, 1fr); }
 .card-heading-controls { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px 14px; min-width: 0; }
