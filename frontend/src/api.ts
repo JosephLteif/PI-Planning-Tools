@@ -1,4 +1,4 @@
-import type { AdminUser, DiscoverableRoomPage, Room, RoomPayload, RoomState, Team, User } from './types';
+import type { AdminUser, DiscoverableRoomPage, JiraConnection, JiraIssue, Room, RoomPayload, RoomState, Team, User } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -267,5 +267,49 @@ export function submitVote(
     method: 'PUT',
     body: { storyId, roundNumber, manual, ai, aiEnabled },
   });
+}
+
+export function getJiraConnection(): Promise<{ connection: JiraConnection | null }> {
+  return request('/api/admin/jira');
+}
+
+export function saveJiraConnection(input: { baseUrl: string; authMode: 'pat' | 'basic'; username?: string; secret: string; boardId?: string; boardName?: string; fieldMappings?: Array<{ jiraField: string; localKey: string }> }): Promise<{ ok: true; connection: JiraConnection }> {
+  return request('/api/admin/jira', { method: 'PUT', body: input });
+}
+
+export function testJiraConnection(): Promise<{ ok: true; user: string }> {
+  return request('/api/admin/jira/test', { method: 'POST' });
+}
+
+export function searchJiraIssues(query: string): Promise<{ issues: JiraIssue[] }> {
+  return request(`/api/jira/issues?q=${encodeURIComponent(query)}`);
+}
+
+export function importJiraIssue(roomId: string, issueKey: string): Promise<RoomPayload> {
+  return request<RoomPayload>(withRoom('/api/jira/issues/import', roomId), { method: 'POST', body: { issueKey } }).then(normalizeRoomPayload);
+}
+
+export function createJiraStory(roomId: string, input: { projectKey: string; title: string; description: string; epicKey?: string }): Promise<RoomPayload> {
+  return request<RoomPayload>(withRoom('/api/jira/stories', roomId), { method: 'POST', body: input }).then(normalizeRoomPayload);
+}
+
+export function listJiraBoards(query = ''): Promise<{ boards: Array<{ id: string; name: string; type: string; location: string }> }> {
+  return request(`/api/jira/boards?q=${encodeURIComponent(query)}`);
+}
+
+export function listJiraSprints(boardId: string): Promise<{ sprints: Array<{ id: string; name: string; state: string; startDate: string; endDate: string; boardId: string }> }> {
+  return request(`/api/jira/boards/${encodeURIComponent(boardId)}/sprints`);
+}
+
+export function createJiraSprint(roomId: string, input: { boardId: string; name: string; startDate?: string; endDate?: string }): Promise<{ sprint: { id: string; name: string; state: string; startDate: string; endDate: string; boardId: string } }> {
+  return request(withRoom('/api/jira/sprints', roomId), { method: 'POST', body: input });
+}
+
+export function linkJiraSprint(roomId: string, input: { localSprintId: string; jiraSprintId: string; boardId?: string }): Promise<{ ok: true }> {
+  return request(withRoom('/api/jira/sprints/link', roomId), { method: 'POST', body: input });
+}
+
+export function moveJiraIssueToSprint(roomId: string, issueKey: string, localSprintId: string | null): Promise<{ ok: true }> {
+  return request(withRoom('/api/jira/sprints/move-issue', roomId), { method: 'POST', body: { issueKey, localSprintId } });
 }
 

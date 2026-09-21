@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ImportStoriesModal } from './ImportStoriesModal';
 import { StoryEditorModal } from './StoryEditorModal';
 import { AppIcon } from './AppIcon';
+import { JiraIssueModal } from './JiraIssueModal';
+import type { JiraIssue } from '../types';
 import type { Room, RoomState, Story, User } from '../types';
 import { cloneState, initials, sequences } from '../state';
 import { isStretchStory, nextImportedStoryId } from '../storyUtils';
@@ -17,6 +19,9 @@ type EstimatesPageProps = {
   onJoin: (joined: boolean) => Promise<void>;
   onClearVotes: () => Promise<void>;
   onRemoveVoter: (accountId: string) => Promise<void>;
+  onSearchJira: (query: string) => Promise<JiraIssue[]>;
+  onImportJira: (issueKey: string) => Promise<void>;
+  onCreateJiraStory: (input: { projectKey: string; title: string; description: string; epicKey?: string }) => Promise<void>;
 };
 
 type StoryQueueProps = {
@@ -31,6 +36,7 @@ type StoryQueueProps = {
   onSelect: (id: string) => void;
   onNew: (type?: string) => void;
   onImport: () => void;
+  onJira: () => void;
   onEdit: (story: Story) => void;
   onMove: (storyId: string, direction: -1 | 1) => void;
   onDelete: (story: Story) => void;
@@ -42,7 +48,7 @@ function formatStoryPoints(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function StoryQueue({ stories, selectedId, collapsed, canManage, aiEnabled, sessionActive, storySelectionDisabled, sessionPaused, onSelect, onNew, onImport, onEdit, onMove, onDelete, onRevote, onToggleCollapsed }: StoryQueueProps) {
+function StoryQueue({ stories, selectedId, collapsed, canManage, aiEnabled, sessionActive, storySelectionDisabled, sessionPaused, onSelect, onNew, onImport, onJira, onEdit, onMove, onDelete, onRevote, onToggleCollapsed }: StoryQueueProps) {
   const epics = useMemo(() => stories.filter((story) => story.type === 'Epic'), [stories]);
   const epicGroups = useMemo(() => epics.map((epic) => ({
     key: epic.id,
@@ -77,7 +83,7 @@ function StoryQueue({ stories, selectedId, collapsed, canManage, aiEnabled, sess
   }, { committed: 0, stretch: 0 }), [stories]);
 
   return <section className={`card queue-card${collapsed ? ' queue-card-collapsed' : ''}`}>
-     <div className="queue-header"><div><h2>Story queue</h2><p>{estimableCount} {estimableCount === 1 ? 'story' : 'stories'} · {estimatedCount} estimated</p><p className="queue-commitment">Committed to <strong>{formatStoryPoints(commitment.committed)} SPs</strong> / <strong>{formatStoryPoints(commitment.stretch)} SPs</strong> stretch</p></div><div className="queue-header-actions">{canManage ? <><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={() => onNew()}><AppIcon name="plus" size={13} /> Story</button><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={() => onNew('Epic')}><AppIcon name="plus" size={13} /> Epic</button><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={onImport}><AppIcon name="upload" size={13} /> Import</button></> : null}<button className="queue-toggle" type="button" aria-expanded={!collapsed} aria-controls="story-queue-content" onClick={onToggleCollapsed}><AppIcon name={collapsed ? 'chevronDown' : 'chevronUp'} size={14} /> {collapsed ? 'Show queue' : 'Hide queue'}</button></div></div>
+     <div className="queue-header"><div><h2>Story queue</h2><p>{estimableCount} {estimableCount === 1 ? 'story' : 'stories'} · {estimatedCount} estimated</p><p className="queue-commitment">Committed to <strong>{formatStoryPoints(commitment.committed)} SPs</strong> / <strong>{formatStoryPoints(commitment.stretch)} SPs</strong> stretch</p></div><div className="queue-header-actions">{canManage ? <><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={onJira}><AppIcon name="plus" size={13} /> Story</button><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={() => onNew('Epic')}><AppIcon name="plus" size={13} /> Epic</button><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={onImport}><AppIcon name="upload" size={13} /> Import</button><button className="outline-button import-button" type="button" disabled={sessionActive} onClick={onJira}><AppIcon name="externalLink" size={13} /> Jira</button></> : null}<button className="queue-toggle" type="button" aria-expanded={!collapsed} aria-controls="story-queue-content" onClick={onToggleCollapsed}><AppIcon name={collapsed ? 'chevronDown' : 'chevronUp'} size={14} /> {collapsed ? 'Show queue' : 'Hide queue'}</button></div></div>
      {!collapsed ? <div id="story-queue-content"><div className="story-queues">{groups.map((group) => <div className="story-queue-group" key={group.key}><div className="story-queue-group-heading"><div><span className="queue-group-icon"><AppIcon name="listChecks" size={13} /></span><span><strong>{group.label}</strong><small>{group.children.filter((story) => story.manual !== null).length}/{group.children.length} estimated{group.epic?.stretch ? ' · Stretch' : ''}</small></span></div>{canManage && group.epic ? <div className="story-queue-group-heading-actions"><button className="story-action-button" type="button" disabled={sessionActive} onClick={() => onEdit(group.epic)} aria-label={`Edit ${group.epic.title}`}><AppIcon name="pencil" size={13} /></button><button className="story-action-button danger-action" type="button" disabled={sessionActive || stories.length <= 1} onClick={() => onDelete(group.epic)} aria-label={`Delete ${group.epic.title}`}><AppIcon name="trash" size={13} /></button></div> : null}</div><div className="story-list">{group.children.length ? group.children.map(storyRow) : <p className="empty-manager">No stories linked to this epic yet.</p>}</div></div>)}</div><div className="queue-footer"><span className="icon"><AppIcon name={sessionPaused ? 'pause' : 'clock'} size={14} /></span>{sessionActive ? canManage ? 'Select any story to switch the active vote.' : 'The room manager controls the active story.' : sessionPaused ? 'Session paused. Add or edit stories, then resume when the queue is ready.' : 'Select a story from the queue, or add more work.'}</div></div> : null}
   </section>;
 }
@@ -104,13 +110,13 @@ function displayVote(value: number | null, submitted: boolean, revealed: boolean
   return submitted ? 'Hidden' : 'Waiting';
 }
 
-export function EstimatesPage({ room, state, user, focusMode = false, saving, onSave, onVote, onJoin, onClearVotes, onRemoveVoter }: EstimatesPageProps) {
+export function EstimatesPage({ room, state, user, focusMode = false, saving, onSave, onVote, onJoin, onClearVotes, onRemoveVoter, onSearchJira, onImportJira, onCreateJiraStory }: EstimatesPageProps) {
   const firstEstimableStory = state.stories.find((story) => story.type !== 'Epic');
   const initialStory = state.stories.find((story) => story.id === state.selectedStoryId && story.type !== 'Epic') || firstEstimableStory;
   const [selectedId, setSelectedId] = useState(initialStory?.id || '');
   const [manual, setManual] = useState<number | null>(null);
   const [ai, setAi] = useState<number | null>(null);
-  const [modal, setModal] = useState<{ kind: 'edit'; story: Story | null; type?: string } | { kind: 'import' } | null>(null);
+  const [modal, setModal] = useState<{ kind: 'edit'; story: Story | null; type?: string } | { kind: 'import' } | { kind: 'jira' } | null>(null);
   const [queueCollapsed, setQueueCollapsed] = useState(true);
   const [now, setNow] = useState(Date.now());
   const selectedStory = state.stories.find((story) => story.id === selectedId && story.type !== 'Epic') || firstEstimableStory;
@@ -352,10 +358,11 @@ export function EstimatesPage({ room, state, user, focusMode = false, saving, on
            }) : <div className="voting-roster-empty">No one has joined this round yet.</div>}</div></div>
          </>}
        </section>
-       <StoryQueue stories={state.stories} selectedId={selectedStory.id} collapsed={queueCollapsed} canManage={canManage} aiEnabled={aiEnabled} sessionActive={sessionActive} storySelectionDisabled={sessionActive && !canManage} sessionPaused={isPaused} onSelect={selectStory} onNew={(type) => editStory(null, type)} onImport={() => setModal({ kind: 'import' })} onEdit={(story) => editStory(story)} onMove={(id, direction) => void moveStory(id, direction)} onDelete={(story) => void deleteStory(story)} onRevote={(story) => void revoteStory(story)} onToggleCollapsed={() => setQueueCollapsed((current) => !current)} />
+       <StoryQueue stories={state.stories} selectedId={selectedStory.id} collapsed={queueCollapsed} canManage={canManage} aiEnabled={aiEnabled} sessionActive={sessionActive} storySelectionDisabled={sessionActive && !canManage} sessionPaused={isPaused} onSelect={selectStory} onNew={(type) => editStory(null, type)} onImport={() => setModal({ kind: 'import' })} onJira={() => setModal({ kind: 'jira' })} onEdit={(story) => editStory(story)} onMove={(id, direction) => void moveStory(id, direction)} onDelete={(story) => void deleteStory(story)} onRevote={(story) => void revoteStory(story)} onToggleCollapsed={() => setQueueCollapsed((current) => !current)} />
      </div>
     {modal?.kind === 'edit' ? <StoryEditorModal key={`${modal.story?.id || 'new'}-${modal.type || ''}`} state={state} story={modal.story} initialType={modal.type} saving={saving} onClose={() => setModal(null)} onSave={saveStory} /> : null}
     {modal?.kind === 'import' ? <ImportStoriesModal epics={state.stories.filter((story) => story.type === 'Epic')} saving={saving} onClose={() => setModal(null)} onImport={importStories} /> : null}
+    {modal?.kind === 'jira' ? <JiraIssueModal saving={saving} onClose={() => setModal(null)} onSearch={onSearchJira} onImport={async (issueKey) => { await onImportJira(issueKey); setModal(null); }} onCreate={async (input) => { await onCreateJiraStory(input); setModal(null); }} /> : null}
   </>;
 }
 

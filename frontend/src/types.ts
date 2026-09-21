@@ -117,6 +117,32 @@ export type Story = {
   saved: boolean;
   stretch: boolean;
   serviceLinks: Array<{ serviceId: string; allocation: number }>;
+  jira?: { key: string; updatedAt: string | null; syncStatus: string; syncError: string | null } | null;
+};
+
+export type JiraConnection = {
+  configured: boolean;
+  baseUrl: string;
+  authMode: 'pat' | 'basic';
+  username: string;
+  boardId: string;
+  boardName: string;
+  fieldMappings: Array<{ jiraField: string; localKey: string }>;
+  updatedAt: string;
+};
+
+export type JiraIssue = {
+  jiraIssueId: string;
+  jiraKey: string;
+  jiraProjectKey: string;
+  jiraUpdatedAt: string | null;
+  id: string;
+  type: string;
+  epicId: string | null;
+  title: string;
+  url: string;
+  description: string;
+  acceptance: string[];
 };
 
 export type RoundPlayer = {

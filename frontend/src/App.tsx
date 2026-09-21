@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getSession, importBackup, joinRoom, listAdminUsers, listDirectoryUsers, listDiscoverableRooms, listRooms, listTeams, loadRoom, login, logout, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveRoomState, setParticipation, submitVote, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
+import { addRoomMember, addTeamMember, ApiError, clearVotes, createAdminUser, createInvite, createJiraSprint, createJiraStory, createRoom, createTeam, deleteAdminUser, deleteRoom, deleteTeam, downloadBackup, getJiraConnection, getSession, importBackup, importJiraIssue, joinRoom, linkJiraSprint, listAdminUsers, listDirectoryUsers, listDiscoverableRooms, listRooms, listTeams, loadRoom, login, logout, moveJiraIssueToSprint, normalizeRoomPayload, promoteTeamOwner, removeRoomMember, removeRoomTeam, removeTeamMember, saveJiraConnection, saveRoomState, searchJiraIssues, setParticipation, submitVote, testJiraConnection, updateAdminUser, updateRoom, updateTeamMemberRole } from './api';
 import { AdminPage } from './components/AdminPage';
 import { AppIcon } from './components/AppIcon';
 import { AuthScreen } from './components/AuthScreen';
@@ -14,7 +14,7 @@ import { RoomsPage } from './components/RoomsPage';
 import { TeamPage } from './components/TeamPage';
 import { SettingsPage } from './components/WorkspacePage';
 import { defaultRoomState } from './state';
-import type { DiscoverableRoom, Room, RoomPayload, RoomState, Team, User } from './types';
+import type { DiscoverableRoom, JiraConnection, Room, RoomPayload, RoomState, Team, User } from './types';
 import './app.css';
 
 type SessionStatus = 'loading' | 'signed-out' | 'signed-in';
@@ -39,6 +39,7 @@ export default function App() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [directoryUsers, setDirectoryUsers] = useState<User[]>([]);
   const [adminUsers, setAdminUsers] = useState<import('./types').AdminUser[]>([]);
+  const [jiraConnection, setJiraConnection] = useState<JiraConnection | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState('');
   const [roomPayload, setRoomPayload] = useState<RoomPayload | null>(null);
   const [view, setView] = useState<ViewKey>('estimates');
@@ -106,11 +107,12 @@ export default function App() {
         setDiscoverableRooms([]);
         setDiscoverableHasMore(false);
         setDiscoverableQuery('');
-        const [payload, nextTeams, nextAdminUsers, nextDirectoryUsers] = await Promise.all([
+        const [payload, nextTeams, nextAdminUsers, nextDirectoryUsers, nextJiraConnection] = await Promise.all([
           loadRoom(nextRoomId),
           listTeams(),
           user.role === 'admin' ? listAdminUsers(nextRoomId) : Promise.resolve([]),
           listDirectoryUsers(),
+          user.role === 'admin' ? getJiraConnection() : Promise.resolve({ connection: null }),
         ]);
         if (!active) return;
         setSelectedRoomId(nextRoomId);
@@ -118,6 +120,7 @@ export default function App() {
         setTeams(nextTeams);
         setAdminUsers(nextAdminUsers);
         setDirectoryUsers(nextDirectoryUsers);
+        setJiraConnection(nextJiraConnection.connection);
       } catch (error) {
         if (active) setNotice(errorMessage(error));
       } finally {
@@ -684,6 +687,60 @@ export default function App() {
     }
   }
 
+  async function handleSaveJira(input: { baseUrl: string; authMode: 'pat' | 'basic'; username?: string; secret: string; fieldMappings?: Array<{ jiraField: string; localKey: string }> }) {
+    setSaving(true);
+    try {
+      const result = await saveJiraConnection(input);
+      setJiraConnection(result.connection);
+      setNotice('Jira connection saved');
+    } catch (error) { setNotice(errorMessage(error)); } finally { setSaving(false); }
+  }
+
+  async function handleTestJira() {
+    setSaving(true);
+    try { const result = await testJiraConnection(); setNotice(`Jira connection works for ${result.user}`); } catch (error) { setNotice(errorMessage(error)); } finally { setSaving(false); }
+  }
+
+  async function handleSearchJira(query: string) {
+    try { return (await searchJiraIssues(query)).issues; } catch (error) { setNotice(errorMessage(error)); return []; }
+  }
+
+  async function handleImportJira(issueKey: string) {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try { const payload = await importJiraIssue(selectedRoomId, issueKey); setRoomPayload(payload); setNotice(`${issueKey} added to the room`); } catch (error) { setNotice(errorMessage(error)); } finally { setSaving(false); }
+  }
+
+  async function handleCreateJiraStory(input: { projectKey: string; title: string; description: string; epicKey?: string }) {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try { const payload = await createJiraStory(selectedRoomId, input); setRoomPayload(payload); setNotice(`${input.title} created in Jira and added to the room`); } catch (error) { setNotice(errorMessage(error)); } finally { setSaving(false); }
+  }
+
+  async function handleMoveJiraStory(story: import('./types').Story, sprintId: string | null) {
+    if (!selectedRoomId || !story.jira?.key || !sprintId) return;
+    setSaving(true);
+    try { await moveJiraIssueToSprint(selectedRoomId, story.jira.key, sprintId); } catch (error) { setNotice(errorMessage(error)); throw error; } finally { setSaving(false); }
+  }
+
+  async function handleLinkJiraSprint(localSprintId: string, jiraSprintId: string, boardId?: string) {
+    if (!selectedRoomId) return;
+    setSaving(true);
+    try { await linkJiraSprint(selectedRoomId, { localSprintId, jiraSprintId, boardId }); setNotice('Jira sprint linked'); } catch (error) { setNotice(errorMessage(error)); } finally { setSaving(false); }
+  }
+
+  async function handleCreateJiraSprint(sprint: import('./types').CapacitySprint) {
+    if (!selectedRoomId) return;
+    const boardId = window.prompt('Jira board ID for this sprint');
+    if (!boardId) return;
+    setSaving(true);
+    try {
+      const result = await createJiraSprint(selectedRoomId, { boardId, name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate });
+      await linkJiraSprint(selectedRoomId, { localSprintId: sprint.id, jiraSprintId: result.sprint.id, boardId });
+      setNotice(`${sprint.name} created and linked in Jira`);
+    } catch (error) { setNotice(errorMessage(error)); } finally { setSaving(false); }
+  }
+
   if (sessionStatus === 'loading') return <div className="pl-loading">Opening Pointline…</div>;
   if (sessionStatus === 'signed-out' || !user) return <AuthScreen error={authError} loading={authLoading} switchingAccount={authMode === 'switch-account'} onSubmit={handleLogin} />;
   if (loadingWorkspace) return <div className="pl-loading">Loading your planning workspace…</div>;
@@ -697,7 +754,7 @@ export default function App() {
   const content = !state
     ? <section className="card pl-placeholder"><div className="sidebar-tip-icon"><AppIcon name="listChecks" size={22} /></div><h2>This room is ready for its first story</h2><p>Initialize the room with a starter story, then invite the team into the first estimation round.</p>{isObserver ? <p className="modal-hint">Observers can view the room once it has been initialized by a room manager.</p> : <button className="primary-button" type="button" disabled={saving} onClick={() => void handleSave(defaultRoomState())}>Initialize room</button>}</section>
     : view === 'vote'
-      ? <EstimatesPage room={room} state={state} user={user} focusMode saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} />
+      ? <EstimatesPage room={room} state={state} user={user} focusMode saving={saving} onSave={handleSave} onVote={handleVote} onJoin={handleJoin} onClearVotes={handleClearVotes} onRemoveVoter={handleRemoveVoter} onSearchJira={handleSearchJira} onImportJira={handleImportJira} onCreateJiraStory={handleCreateJiraStory} />
       : view === 'estimates'
         ? <DashboardPage room={room} state={state} />
       : view === 'rooms'
@@ -707,12 +764,12 @@ export default function App() {
         : view === 'settings'
             ? <SettingsPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
             : view === 'board'
-              ? <DeliveryBoardPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} />
+              ? <DeliveryBoardPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} onMoveJiraStory={handleMoveJiraStory} />
             : view === 'capacity'
-              ? <CapacityPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} />
+              ? <CapacityPage room={room} state={state} user={user} saving={saving} readOnly={isObserver} onSave={handleSave} onLinkJiraSprint={handleLinkJiraSprint} onCreateJiraSprint={handleCreateJiraSprint} />
               : view === 'resources'
                 ? <ResourcesPage state={state} saving={saving} readOnly={isObserver} onSave={handleSave} />
-                : <AdminPage users={adminUsers} currentUserId={user.id} saving={saving} onCreate={handleCreateAdminUser} onUpdate={handleUpdateAdminUser} onDelete={handleDeleteAdminUser} onExport={handleExportBackup} onImport={handleImportBackup} />;
+                : <AdminPage users={adminUsers} currentUserId={user.id} saving={saving} onCreate={handleCreateAdminUser} onUpdate={handleUpdateAdminUser} onDelete={handleDeleteAdminUser} onExport={handleExportBackup} onImport={handleImportBackup} jiraConnection={jiraConnection} onSaveJira={handleSaveJira} onTestJira={handleTestJira} />;
 
   return <><AppShell user={user} rooms={rooms} selectedRoomId={selectedRoomId} view={view} collapsed={sidebarCollapsed} onRoomChange={handleRoomChange} onViewChange={setView} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} onSwitchAccount={handleSwitchAccount} onSignOut={handleSignOut}>{content}</AppShell>{notice ? <div className="pl-toast" role="status">{notice}</div> : null}</>;
 }

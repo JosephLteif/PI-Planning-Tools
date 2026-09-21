@@ -11,3 +11,5 @@ services:
         sync: false
       - key: POINTLINE_BOOTSTRAP_ADMIN_PASSWORD
         sync: false
+      - key: POINTLINE_JIRA_ENCRYPTION_KEY
+        sync: false

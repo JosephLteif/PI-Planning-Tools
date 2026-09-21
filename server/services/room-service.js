@@ -55,9 +55,11 @@ export async function readRoomState(db, roomId, userId) {
   const [domainResult, serviceResult, storyResult, allocationResult, memberResult, voteHistoryResult, memberRosterResult, votingMemberResult, roomTeamMemberResult] = await Promise.all([
     db.prepare('SELECT id, name, sort_order FROM domains WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
     db.prepare('SELECT id, name, domain_id, sort_order FROM services WHERE room_id = ? ORDER BY sort_order, id').bind(roomId).all(),
-    db.prepare(`SELECT story_key, type, epic_id, title, url, description, acceptance_json, sort_order,
-      manual_estimate, ai_estimate, ai_enabled, saved, stretch
-      FROM stories WHERE room_id = ? ORDER BY sort_order, story_key`).bind(roomId).all(),
+    db.prepare(`SELECT s.story_key, s.type, s.epic_id, s.title, s.url, s.description, s.acceptance_json, s.sort_order,
+      s.manual_estimate, s.ai_estimate, s.ai_enabled, s.saved, s.stretch,
+      jl.jira_key, jl.jira_updated_at, jl.sync_status AS jira_sync_status, jl.sync_error AS jira_sync_error
+      FROM stories s LEFT JOIN jira_issue_links jl ON jl.room_id = s.room_id AND jl.story_key = s.story_key
+      WHERE s.room_id = ? ORDER BY s.sort_order, s.story_key`).bind(roomId).all(),
     db.prepare(`SELECT story_key, service_id, allocation_pct
       FROM story_service_allocations WHERE room_id = ? ORDER BY story_key, service_id`).bind(roomId).all(),
     db.prepare('SELECT COUNT(*) AS count FROM room_members WHERE room_id = ?').bind(roomId).first(),
@@ -119,6 +121,7 @@ export async function readRoomState(db, roomId, userId) {
       saved: story.saved === 1,
       stretch: Number(story.stretch) === 1,
       serviceLinks: linksByStory.get(story.story_key) || [],
+      jira: story.jira_key ? { key: story.jira_key, updatedAt: story.jira_updated_at || null, syncStatus: story.jira_sync_status || 'synced', syncError: story.jira_sync_error || null } : null,
     };
   });
 

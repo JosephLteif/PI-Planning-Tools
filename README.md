@@ -10,6 +10,7 @@ Pointline requires PostgreSQL for its Node runtime. Start a PostgreSQL instance,
 $env:POINTLINE_BOOTSTRAP_ADMIN_USERNAME = 'admin'
 $env:POINTLINE_BOOTSTRAP_ADMIN_PASSWORD = 'replace-with-a-random-password'
 $env:DATABASE_URL = 'postgresql://pointline:password@localhost:5432/pointline'
+$env:POINTLINE_JIRA_ENCRYPTION_KEY = 'replace-with-a-long-random-secret'
 .\start-pointline.ps1
 ```
 
@@ -48,6 +49,7 @@ After sign-in:
 - the Team page creates reusable teams, and invite links can add a person to a team, add a person to a room, or bring a team into a room;
 - stories, final manual/AI fields, services, domains, allocations, and round state persist in the configured database;
 - votes are stored per account, story, and round;
+- Jira Server/Data Center can be connected from the Admin page. The connection is workspace-wide, stores its credentials encrypted with `POINTLINE_JIRA_ENCRYPTION_KEY`, and supports Jira issue search/import, Jira Story creation, epic child-story import, sprint creation/linking, and Jira sprint moves;
 - hidden rounds return only your own vote plus the submitted count; open and revealed rounds return the room’s votes;
 - the browser opens an authenticated WebSocket for room state updates while open, with the existing SSE stream as a transport fallback so teammates can estimate the same story concurrently.
 

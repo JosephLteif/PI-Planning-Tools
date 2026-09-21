@@ -40,6 +40,21 @@ import {
 } from '../services/room-service.js';
 import { acceptInvite, createInvite, readInvite } from '../services/invite-service.js';
 import { exportBackup, importBackup } from '../services/backup-service.js';
+import {
+  createJiraSprint,
+  createJiraStory,
+  getJiraEpicChildren,
+  getJiraIssue,
+  importJiraIssueIntoRoom,
+  listJiraBoards,
+  listJiraSprints,
+  moveJiraIssue,
+  normalizeJiraError,
+  readJiraConnection,
+  saveJiraConnection,
+  searchJiraIssues,
+  testJiraConnection,
+} from '../services/jira-service.js';
 
 export async function handleApiRequest(request, env) {
   if (!env.DB) return json({ error: 'The Pointline database binding is not configured' }, 500);
@@ -70,6 +85,23 @@ export async function handleApiRequest(request, env) {
   if (url.pathname === '/api/admin/backup/import' && request.method === 'POST') {
     requireAdmin(user);
     return json(await importBackup(env.DB, await readJson(request, 50_000_000)));
+  }
+
+  if (url.pathname === '/api/admin/jira' && request.method === 'GET') {
+    requireAdmin(user);
+    return json({ connection: await readJiraConnection(env.DB) });
+  }
+  if (url.pathname === '/api/admin/jira' && request.method === 'PUT') {
+    requireAdmin(user);
+    return json({ ok: true, connection: await saveJiraConnection(env.DB, env, await readJson(request)) });
+  }
+  if (url.pathname === '/api/admin/jira/test' && request.method === 'POST') {
+    requireAdmin(user);
+    try {
+      return json(await testJiraConnection(env.DB, env));
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
   }
 
   const roomId = roomIdFromRequest(request);
@@ -192,6 +224,100 @@ export async function handleApiRequest(request, env) {
   }
 
   await requireMember(env.DB, roomId, user);
+
+  if (url.pathname === '/api/jira/issues' && request.method === 'GET') {
+    const connection = await readJiraConnection(env.DB);
+    if (!connection) return json({ error: 'Jira is not configured' }, 503);
+    try {
+      return json({ issues: await searchJiraIssues(env.DB, env, url.searchParams.get('q') || '', connection.baseUrl, connection.fieldMappings) });
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  const jiraIssuePathMatch = url.pathname.match(/^\/api\/jira\/issues\/([^/]+)$/);
+  if (jiraIssuePathMatch && request.method === 'GET') {
+    try {
+      return json({ issue: await getJiraIssue(env.DB, env, decodeURIComponent(jiraIssuePathMatch[1])) });
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  if (url.pathname === '/api/jira/issues/import' && request.method === 'POST') {
+    try {
+      const input = await readJson(request);
+      const issue = await getJiraIssue(env.DB, env, cleanId(input.issueKey));
+      const importedIssues = issue.type === 'Epic' ? [issue, ...(await getJiraEpicChildren(env.DB, env, issue.jiraKey))] : [issue];
+      let storyKey = '';
+      for (const importedIssue of importedIssues) {
+        storyKey = await importJiraIssueIntoRoom(env.DB, roomId, importedIssue);
+      }
+      const room = await readRoomState(env.DB, roomId, user.id);
+      await publishRoomState(env.DB, roomId);
+      return json({ ok: true, storyKey, importedCount: importedIssues.length, roomId, ...room });
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  if (url.pathname === '/api/jira/stories' && request.method === 'POST') {
+    try {
+      const issue = await createJiraStory(env.DB, env, await readJson(request));
+      const storyKey = await importJiraIssueIntoRoom(env.DB, roomId, issue);
+      const room = await readRoomState(env.DB, roomId, user.id);
+      await publishRoomState(env.DB, roomId);
+      return json({ ok: true, storyKey, roomId, ...room }, 201);
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  if (url.pathname === '/api/jira/boards' && request.method === 'GET') {
+    try {
+      return json({ boards: await listJiraBoards(env.DB, env, url.searchParams.get('q') || '') });
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  const jiraBoardSprintsMatch = url.pathname.match(/^\/api\/jira\/boards\/([^/]+)\/sprints$/);
+  if (jiraBoardSprintsMatch && request.method === 'GET') {
+    try {
+      return json({ sprints: await listJiraSprints(env.DB, env, decodeURIComponent(jiraBoardSprintsMatch[1])) });
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  if (url.pathname === '/api/jira/sprints' && request.method === 'POST') {
+    try {
+      return json({ ok: true, sprint: await createJiraSprint(env.DB, env, await readJson(request)) }, 201);
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
+  if (url.pathname === '/api/jira/sprints/link' && request.method === 'POST') {
+    const input = await readJson(request);
+    const now = new Date().toISOString();
+    await env.DB.prepare(`INSERT INTO jira_sprint_links (room_id, local_sprint_id, jira_sprint_id, board_id, sync_status, sync_error, updated_at)
+      VALUES (?, ?, ?, ?, 'synced', NULL, ?)
+      ON CONFLICT(room_id, local_sprint_id) DO UPDATE SET jira_sprint_id = excluded.jira_sprint_id,
+        board_id = excluded.board_id, sync_status = 'synced', sync_error = NULL, updated_at = excluded.updated_at`)
+      .bind(roomId, cleanId(input.localSprintId), cleanId(input.jiraSprintId), cleanId(input.boardId) || null, now).run();
+    return json({ ok: true });
+  }
+  if (url.pathname === '/api/jira/sprints/move-issue' && request.method === 'POST') {
+    try {
+      const input = await readJson(request);
+      const issueKey = cleanId(input.issueKey);
+      let jiraSprintId = cleanId(input.jiraSprintId);
+      if (!jiraSprintId && cleanId(input.localSprintId)) {
+        const link = await env.DB.prepare('SELECT jira_sprint_id FROM jira_sprint_links WHERE room_id = ? AND local_sprint_id = ? LIMIT 1')
+          .bind(roomId, cleanId(input.localSprintId)).first();
+        jiraSprintId = cleanId(link?.jira_sprint_id);
+      }
+      if (!issueKey || !jiraSprintId) throw authError('The Jira issue and destination sprint must be linked', 409);
+      await moveJiraIssue(env.DB, env, issueKey, jiraSprintId);
+      return json({ ok: true, issueKey });
+    } catch (error) {
+      return json({ error: normalizeJiraError(error) }, 502);
+    }
+  }
 
   if (url.pathname === '/api/me' && request.method === 'GET') {
     const room = await readRoomState(env.DB, roomId, user.id);

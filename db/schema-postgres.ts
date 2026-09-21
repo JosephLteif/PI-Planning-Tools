@@ -125,6 +125,45 @@ export const stories = pgTable('stories', {
   storiesEpicIdx: index('stories_epic_idx').on(table.roomId, table.epicId),
 }));
 
+export const jiraConnections = pgTable('jira_connections', {
+  id: text('id').primaryKey(),
+  baseUrl: text('base_url').notNull(),
+  authMode: text('auth_mode').notNull(),
+  username: text('username'),
+  secretCiphertext: text('secret_ciphertext').notNull(),
+  boardId: text('board_id'),
+  boardName: text('board_name'),
+  fieldMappingsJson: text('field_mappings_json').notNull().default('[]'),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const jiraIssueLinks = pgTable('jira_issue_links', {
+  roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
+  storyKey: text('story_key').notNull(),
+  jiraIssueId: text('jira_issue_id').notNull(),
+  jiraKey: text('jira_key').notNull(),
+  jiraProjectKey: text('jira_project_key'),
+  jiraUpdatedAt: text('jira_updated_at'),
+  syncStatus: text('sync_status').notNull().default('synced'),
+  syncError: text('sync_error'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  jiraIssueLinksPk: primaryKey({ columns: [table.roomId, table.storyKey] }),
+  jiraIssueLinksIssueIdx: uniqueIndex('jira_issue_links_issue_idx').on(table.roomId, table.jiraIssueId),
+}));
+
+export const jiraSprintLinks = pgTable('jira_sprint_links', {
+  roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
+  localSprintId: text('local_sprint_id').notNull(),
+  jiraSprintId: text('jira_sprint_id').notNull(),
+  boardId: text('board_id'),
+  syncStatus: text('sync_status').notNull().default('synced'),
+  syncError: text('sync_error'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  jiraSprintLinksPk: primaryKey({ columns: [table.roomId, table.localSprintId] }),
+}));
+
 export const storyServiceAllocations = pgTable('story_service_allocations', {
   roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),
   storyKey: text('story_key').notNull(),

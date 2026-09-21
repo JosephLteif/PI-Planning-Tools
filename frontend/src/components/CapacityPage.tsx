@@ -11,6 +11,8 @@ type CapacityPageProps = {
   saving: boolean;
   readOnly?: boolean;
   onSave: (state: RoomState) => Promise<void>;
+  onLinkJiraSprint?: (localSprintId: string, jiraSprintId: string, boardId?: string) => Promise<void>;
+  onCreateJiraSprint?: (sprint: CapacitySprint) => Promise<void>;
 };
 
 function nextSprint() {
@@ -80,7 +82,7 @@ function SprintEditorModal({ sprint, saving, onClose, onSave }: { sprint: Capaci
   );
 }
 
-export function CapacityPage({ room, state, user, saving, readOnly = false, onSave }: CapacityPageProps) {
+export function CapacityPage({ room, state, user, saving, readOnly = false, onSave, onLinkJiraSprint, onCreateJiraSprint }: CapacityPageProps) {
   const [editingSprint, setEditingSprint] = useState<CapacitySprint | null>(null);
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [selectedSprintId, setSelectedSprintId] = useState('');
@@ -197,7 +199,7 @@ export function CapacityPage({ room, state, user, saving, readOnly = false, onSa
               <h2>{selectedSprint.name}</h2>
               <p className="settings-copy">{selectedSprint.startDate || 'Start date'} → {selectedSprint.endDate || 'End date'} · {businessDays(selectedSprint.startDate, selectedSprint.endDate)} weekdays</p>
             </div>
-            {canEdit ? <div className="footer-actions"><button className="outline-button" type="button" disabled={saving} onClick={() => setEditingSprint(selectedSprint)}>Edit</button><button className="outline-button" type="button" disabled={saving} onClick={() => saveCapacity((next) => { next.capacity.sprints = next.capacity.sprints.filter((item) => item.id !== selectedSprint.id); })}>Remove</button></div> : null}
+            {canEdit ? <div className="footer-actions"><button className="outline-button" type="button" disabled={saving} onClick={() => setEditingSprint(selectedSprint)}>Edit</button><button className="outline-button" type="button" disabled={saving} onClick={() => { const jiraSprintId = window.prompt('Jira sprint ID to link'); if (jiraSprintId && onLinkJiraSprint) void onLinkJiraSprint(selectedSprint.id, jiraSprintId); }}>Link Jira sprint</button><button className="outline-button" type="button" disabled={saving} onClick={() => { if (onCreateJiraSprint) void onCreateJiraSprint(selectedSprint); }}>Create in Jira</button><button className="outline-button" type="button" disabled={saving} onClick={() => saveCapacity((next) => { next.capacity.sprints = next.capacity.sprints.filter((item) => item.id !== selectedSprint.id); })}>Remove</button></div> : null}
           </div>
 
           <div className="capacity-summary-grid">

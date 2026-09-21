@@ -11,6 +11,7 @@ type DeliveryBoardPageProps = {
   saving: boolean;
   readOnly?: boolean;
   onSave: (state: RoomState) => Promise<void>;
+  onMoveJiraStory?: (story: Story, sprintId: string | null) => Promise<void>;
 };
 
 const EPIC_COLORS = ['#4968d8', '#b061d5', '#d47449', '#28a58b', '#c59b32', '#d95570', '#448ab9', '#7d8b3e'];
@@ -78,7 +79,7 @@ function DeliveryStoryCard({ story, epic, epicColor, sprintId, sprints, canEdit,
   );
 }
 
-export function DeliveryBoardPage({ room, state, user, saving, readOnly = false, onSave }: DeliveryBoardPageProps) {
+export function DeliveryBoardPage({ room, state, user, saving, readOnly = false, onSave, onMoveJiraStory }: DeliveryBoardPageProps) {
   const [draggingStoryId, setDraggingStoryId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [focusedSprintId, setFocusedSprintId] = useState('');
@@ -148,6 +149,8 @@ export function DeliveryBoardPage({ room, state, user, saving, readOnly = false,
     if (!canEdit || saving) return;
     const currentSprintId = assignments[storyId] || null;
     if (currentSprintId === sprintId) return;
+    const story = stories.find((candidate) => candidate.id === storyId);
+    if (story && onMoveJiraStory) await onMoveJiraStory(story, sprintId);
     const next = cloneState(state);
     const nextAssignments = { ...(next.capacity.storySprintIds || {}) };
     if (sprintId) nextAssignments[storyId] = sprintId;
